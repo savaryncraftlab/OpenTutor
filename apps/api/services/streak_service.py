@@ -10,9 +10,25 @@ dashboard. The ADHD-safe contract from the plan:
   totally-empty account still produces ``streak_days == 0``; a 5-day
   streak survives a 0-XP today until tomorrow's compute.
 * When ``auto_apply_freezes=True`` and the user still has weekly freeze
-  budget, a broken day inside the walk is retroactively saved by
-  inserting a fresh ``FreezeToken`` row keyed to that day. This is the
-  only side-effect path; the read-only path leaves the DB untouched.
+  budget, a broken day inside the walk would retroactively be saved by
+  inserting a fresh ``FreezeToken`` row keyed to that day. **This path
+  is currently invariant-locked OFF** — see "NOT NULL invariant" below.
+  All production callers pass ``auto_apply_freezes=False``; the
+  function raises :class:`NotImplementedError` if ever invoked with
+  ``True`` until the deferred Alembic migration lands.
+
+NOT NULL invariant (Phase B remaining-audit, 2026-05-04):
+
+* Live Postgres schema has ``freeze_tokens.problem_id NOT NULL``
+  (created by ``20260423_0002_freeze_tokens.py``); the planned
+  follow-up migration to relax that to NULL was never landed despite
+  prior comments in this file claiming otherwise.
+* The auto-apply code below constructs ``FreezeToken(problem_id=None)``,
+  which would crash with ``IntegrityError`` against that schema. To
+  prevent silent breakage we (a) gate the parameter at function entry
+  and (b) keep the dangerous construction site annotated. The real fix
+  (Alembic migration on populated DB) is deferred — see
+  ``plan/streak_walker_session_cap_plan.md``.
 
 The module uses Subagent A's contract:
 
@@ -232,17 +248,40 @@ async def compute_streak(
         today_utc: Override for "today" — defaults to
             ``datetime.now(timezone.utc).date()``. Tests use this to
             anchor a deterministic walk window.
-        auto_apply_freezes: When True, insert a streak-saver
+        auto_apply_freezes: **Currently invariant-locked to False.** The
+            historical contract was: when True, insert a streak-saver
             ``FreezeToken`` row each time the walk hits a broken day
-            and the user still has weekly budget. When False (default),
-            the walk is read-only and stops at the first broken day
-            without touching the DB.
+            and the user still has weekly budget. The implementation
+            constructs ``FreezeToken(problem_id=None)``, which the live
+            Postgres schema rejects (``freeze_tokens.problem_id`` is
+            NOT NULL — see module docstring). All production callers
+            pass False; passing True raises :class:`NotImplementedError`
+            until the deferred migration lands. See
+            ``plan/streak_walker_session_cap_plan.md``.
+
+    Raises:
+        NotImplementedError: When ``auto_apply_freezes=True``. The
+            on-disk schema cannot accept the rows this branch would
+            insert; failing fast at the boundary beats a downstream
+            ``IntegrityError`` after partial walk state was built.
 
     Returns:
         :class:`StreakResult` — see its docstring for field semantics.
         ``freezes_left_this_week`` reflects the post-walk state, so the
         caller can render the dashboard counter without a second query.
     """
+
+    if auto_apply_freezes:
+        # Invariant guard — see module docstring "NOT NULL invariant".
+        # Production never trips this; flipping the flag without first
+        # landing the Alembic migration on populated Postgres would
+        # crash with IntegrityError mid-walk. Fail fast instead.
+        raise NotImplementedError(
+            "auto_apply_freezes=True is currently unsupported — "
+            "FreezeToken.problem_id is NOT NULL in the live schema, "
+            "but this code path constructs FreezeToken(problem_id=None). "
+            "See plan/streak_walker_session_cap_plan.md for the deferred fix."
+        )
 
     today = today_utc or utcnow().date()
     # Anchor "now" to the caller's ``today_utc`` so all downstream
@@ -337,8 +376,14 @@ async def compute_streak(
                 break
 
             # Mint the streak-saver freeze. ``problem_id=None`` is the
-            # explicit marker (Phase 14 model now allows NULL after
-            # Subagent A's migration).
+            # intended marker for "this token doesn't belong to a card,
+            # it's a calendar-day saver". DEAD CODE under the current
+            # invariant: the function-entry guard above raises
+            # NotImplementedError before we ever get here. The shape is
+            # preserved for the day the deferred Alembic migration drops
+            # the NOT NULL constraint and the guard is removed — see
+            # plan/streak_walker_session_cap_plan.md. (Earlier comments
+            # claiming the migration had already landed were stale.)
             day_start, day_end = _day_bounds_utc(day)
             token = FreezeToken(
                 user_id=user_id,

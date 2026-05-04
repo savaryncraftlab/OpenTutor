@@ -41,8 +41,10 @@ from models.learning_path import LearningPath, PathRoom
 from models.practice import PracticeProblem
 from models.user import User
 from scripts.seed_python_paths import (
+    _GENERIC_SLUG_HINTS_DENY,
     SeedSummary,
     _url_match_key,
+    _url_to_title_hints,
     _write_report_json,
     main,
 )
@@ -605,6 +607,58 @@ def test_url_match_key_keeps_different_paths_distinct():
     assert _url_match_key(
         "https://docs.python.org/3/tutorial/introduction.html"
     ) != _url_match_key("https://docs.python.org/3/tutorial/controlflow.html")
+
+
+# ── B-1 root-cause prevention: generic-slug-hint denylist ──────────────
+
+
+def test_url_to_title_hints_drops_generic_introduction():
+    """``introduction.html`` slug must NOT emit the bare hint
+    ``"introduction"`` — historically caused py_intro to absorb
+    py_error_patterns content via substring match.
+    """
+    hints = _url_to_title_hints("https://docs.python.org/3/tutorial/introduction.html")
+    assert "introduction" not in hints
+    assert "intro" not in hints
+
+
+def test_url_to_title_hints_drops_generic_classes_and_async():
+    """Other broad single-word slugs that historically caused leaks
+    (classes → py_dataclasses_intro absorbed; async → py_concurrency
+    absorbed) must also be filtered out.
+    """
+    assert "classes" not in _url_to_title_hints(
+        "https://docs.python.org/3/tutorial/classes.html"
+    )
+    assert "asyncio" not in _url_to_title_hints(
+        "https://docs.python.org/3/library/asyncio.html"
+    )
+
+
+def test_url_to_title_hints_keeps_multi_word_slugs():
+    """Multi-word kebab slugs are specific enough to substring-match
+    safely — denylist must not over-filter them.
+    """
+    hints = _url_to_title_hints(
+        "https://realpython.com/defining-your-own-python-function/"
+    )
+    # Multi-word kebab variant survives (specific enough).
+    assert "defining your own python function" in hints
+
+
+def test_url_to_title_hints_keeps_pep_style():
+    """PEP slugs ("pep-0589") are specific identifiers, not generics."""
+    hints = _url_to_title_hints("https://peps.python.org/pep-0589/")
+    # Numeric PEP id stays — not a generic English word.
+    assert "pep 589" in hints
+
+
+def test_generic_slug_hints_deny_covers_known_leak_words():
+    """Sanity: the denylist constant includes every single-word leak
+    vector seen on Phase B-1 audit.
+    """
+    must_deny = {"introduction", "intro", "classes", "async", "asyncio"}
+    assert must_deny.issubset(_GENERIC_SLUG_HINTS_DENY)
 
 
 # ── helpers ────────────────────────────────────────────────────────────

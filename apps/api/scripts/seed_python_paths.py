@@ -63,6 +63,33 @@ _DEFAULT_DIFFICULTY = 2
 _DEFAULT_ETA_MINUTES = 15
 _DEFAULT_MODULE_LABEL = ""
 
+# B-1 root-cause prevention (2026-05-04): single-word URL-slug hints are
+# too broad — ``_matches_any_hint`` is plain case-insensitive substring
+# match, so a hint like ``"introduction"`` swallows any future page whose
+# title contains the word (e.g. py_intro absorbed py_error_patterns
+# content via the slug "introduction.html"). Yaml ``match_titles`` already
+# supports multi-word phrases for safe disambiguation; URL slug auto-
+# extraction must not emit single-word generics that swallow siblings.
+# Multi-word hints (e.g. ``"control flow"``, ``"defining your own python
+# function"``) stay allowed — they are specific enough to avoid leaks.
+_GENERIC_SLUG_HINTS_DENY = frozenset(
+    {
+        "introduction",
+        "intro",
+        "guide",
+        "tutorial",
+        "python",
+        "classes",
+        "class",
+        "async",
+        "asyncio",
+        "functions",
+        "function",
+        "exceptions",
+        "exception",
+    }
+)
+
 
 # ── Structured summary ─────────────────────────────────────────────────
 
@@ -117,19 +144,31 @@ def _url_to_title_hints(url: str) -> set[str]:
     pull likely keyword stems from the URL slug and substring-match
     them against the title.
 
+    Hints whose lowercase form is in :data:`_GENERIC_SLUG_HINTS_DENY`
+    are dropped — they are too broad for a substring matcher and cause
+    cross-room sibling leaks (B-1 class). Use yaml ``match_titles`` for
+    explicit, multi-word disambiguation when a slug is generic.
+
     Example::
 
         "https://realpython.com/defining-your-own-python-function/"
         → {"defining your own python function"}
 
         "https://docs.python.org/3/tutorial/introduction.html"
-        → {"introduction"}
+        → set()  # "introduction" in deny → dropped
 
         "https://docs.python.org/3/tutorial/controlflow.html"
         → {"controlflow", "control flow"}
 
         "https://peps.python.org/pep-0589/"
         → {"pep-0589", "pep 0589", "pep 589"}
+
+    Verifies the denylist::
+
+        >>> "introduction" not in _url_to_title_hints(
+        ...     "https://docs.python.org/3/tutorial/introduction.html"
+        ... )
+        True
     """
 
     parts = urlsplit(url.strip().lower())
@@ -154,7 +193,12 @@ def _url_to_title_hints(url: str) -> set[str]:
     # slug, but the title does ("3. An Informal Introduction"). Add the
     # whole-word slug as a hint; the number prefix on the title doesn't
     # break substring match.
-    return hints
+
+    # Drop generic single-word hints that are too broad for substring
+    # matching (see ``_GENERIC_SLUG_HINTS_DENY`` rationale). Multi-word
+    # hints survive because they are specific enough to disambiguate
+    # siblings.
+    return {h for h in hints if h not in _GENERIC_SLUG_HINTS_DENY}
 
 
 def _matches_any_hint(title: str, hints: set[str]) -> bool:
