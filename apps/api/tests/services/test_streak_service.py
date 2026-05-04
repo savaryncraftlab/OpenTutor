@@ -49,6 +49,7 @@ from database import Base
 from models.freeze_token import FreezeToken
 from models.user import User
 from models.xp_event import XpEvent  # registers xp_events table on Base.metadata
+from services import streak_service
 from services.streak_service import compute_streak
 
 
@@ -184,6 +185,22 @@ async def _add_freeze(
         )
     )
     await db.commit()
+
+
+def _bypass_auto_apply_invariant_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Toggle ``streak_service._TEST_SKIP_INVARIANT_GUARD`` for cap tests.
+
+    The wave-2 invariant guard at the top of ``compute_streak`` raises
+    ``NotImplementedError`` when ``auto_apply_freezes=True`` because the
+    live Postgres schema has ``freeze_tokens.problem_id NOT NULL``. The
+    SQLite test harness relaxes that constraint at the schema level
+    (see ``db_session`` fixture), so the inner walker is safe to
+    exercise — we just need to skip the boundary check. The production
+    code path (real Postgres) keeps the real guard. Cross-reference:
+    plan/streak_walker_session_cap_plan.md
+    """
+
+    monkeypatch.setattr(streak_service, "_TEST_SKIP_INVARIANT_GUARD", True)
 
 
 # ── 1. New account → 0 ──────────────────────────────────────────────
@@ -421,20 +438,29 @@ async def test_zero_amount_event_does_not_maintain_day(db_session, seeded_user) 
 # ── 9. Walk is bounded — sparse history doesn't burn the loop ──────
 
 
-@pytest.mark.skip(reason=_AUTO_APPLY_INVARIANT_SKIP)
 @pytest.mark.asyncio
-async def test_walk_is_bounded(db_session, seeded_user) -> None:
+async def test_walk_is_bounded(db_session, seeded_user, monkeypatch) -> None:
     """One very-old event + auto_apply does not run away.
 
     Earliest event 30 days ago. With ``auto_apply_freezes=True`` and a
     freshly-allocated budget of 3, the walker must terminate without
     forging a 365-day streak. The streak-saver guard "do not extend
     the streak past the user's earliest event" caps the walk at 30
-    days from today; combined with the weekly freeze cap (3) the user
-    can save at most three of the missing days. ``streak_days``
-    therefore lands at 1 (the lone event itself) plus whatever
-    contiguous bridging the freezes managed — never near 30.
+    days from today; combined with the session-total cap
+    (``max_freezes_per_walk=3``) the user can save at most three of
+    the missing days. ``streak_days`` therefore lands at 1 (the lone
+    event itself) plus whatever contiguous bridging the freezes
+    managed — never near 30.
+
+    Note on the monkeypatch: ``compute_streak`` raises
+    ``NotImplementedError`` for ``auto_apply_freezes=True`` to protect
+    production Postgres (NOT NULL invariant on
+    ``freeze_tokens.problem_id``). The SQLite harness relaxes that
+    constraint, so we flip ``_TEST_SKIP_INVARIANT_GUARD`` to reach the
+    walker. See plan/streak_walker_session_cap_plan.md.
     """
+
+    _bypass_auto_apply_invariant_guard(monkeypatch)
 
     very_old = _ANCHOR_DATE - timedelta(days=30)
     await _add_event(db_session, user_id=seeded_user, day=very_old)
@@ -447,7 +473,7 @@ async def test_walk_is_bounded(db_session, seeded_user) -> None:
     )
     # We don't assert an exact number here — the fragile thing is the
     # bound. The walk must produce a small finite result and must
-    # never insert more than the weekly quota of freezes.
+    # never insert more than the session-total cap of freezes.
     assert result.streak_days >= 0
     assert result.streak_days < 30
     assert len(result.freezes_used_dates) <= 3
@@ -484,4 +510,75 @@ async def test_freezes_left_reflects_post_walk_state(db_session, seeded_user) ->
     # yesterday → 2 remaining. The post-walk meta query in compute_streak
     # must reflect that change without a second commit cycle.
     assert result.freezes_left_this_week == 2
+    assert len(result.freezes_used_dates) == 1
+
+
+# ── 11. Session-total cap respects max_freezes_per_walk default ─────
+
+
+@pytest.mark.asyncio
+async def test_walk_cap_respects_max_freezes_per_walk(
+    db_session, seeded_user, monkeypatch
+) -> None:
+    """4+ historical gaps + auto_apply with default cap (=3) → exactly 3 freezes.
+
+    Seed an old event 10 days ago and a recent event 1 day ago, with no
+    activity in the 8-day gap between them. The walker reaches the gap,
+    fires freezes day-by-day, and must stop once 3 freezes have been
+    inserted — even though the per-week budget would refresh into the
+    prior ISO week. Without the cap a multi-week walk would mint
+    ``3 × weeks_walked`` freezes silently. See
+    plan/streak_walker_session_cap_plan.md.
+    """
+
+    _bypass_auto_apply_invariant_guard(monkeypatch)
+
+    # Earliest event 10 days ago → walk floor sits there. The 8-day gap
+    # between day-2 and day-9 spans two ISO weeks for ``_ANCHOR_DATE``
+    # (Wed 2026-04-22), so a naive per-week cap would top up budget on
+    # the week boundary. The session-total cap must override.
+    earliest = _ANCHOR_DATE - timedelta(days=10)
+    await _add_event(db_session, user_id=seeded_user, day=earliest)
+    await _add_event(db_session, user_id=seeded_user, day=_ANCHOR_DATE)
+
+    result = await compute_streak(
+        db_session,
+        user_id=seeded_user,
+        today_utc=_ANCHOR_DATE,
+        auto_apply_freezes=True,
+    )
+    # Exactly 3 freezes inserted regardless of how many weeks the walk
+    # touches; ``freezes_left_this_week`` reflects the current ISO
+    # week's remaining budget after the walk's commit.
+    assert len(result.freezes_used_dates) == 3
+    # All inserted freezes must be inside the walk window (not before
+    # the earliest event, not after today).
+    assert all(earliest <= d <= _ANCHOR_DATE for d in result.freezes_used_dates)
+
+
+# ── 12. Session-total cap is overridable via max_freezes_per_walk ──
+
+
+@pytest.mark.asyncio
+async def test_walk_cap_overridable(db_session, seeded_user, monkeypatch) -> None:
+    """``max_freezes_per_walk=1`` caps insertions at 1 even with full quota.
+
+    Same shape as the previous test but with the cap explicitly lowered
+    to 1. The walker must stop after the first inserted freeze even
+    though the per-week budget shows ``remaining=2``.
+    """
+
+    _bypass_auto_apply_invariant_guard(monkeypatch)
+
+    earliest = _ANCHOR_DATE - timedelta(days=10)
+    await _add_event(db_session, user_id=seeded_user, day=earliest)
+    await _add_event(db_session, user_id=seeded_user, day=_ANCHOR_DATE)
+
+    result = await compute_streak(
+        db_session,
+        user_id=seeded_user,
+        today_utc=_ANCHOR_DATE,
+        auto_apply_freezes=True,
+        max_freezes_per_walk=1,
+    )
     assert len(result.freezes_used_dates) == 1

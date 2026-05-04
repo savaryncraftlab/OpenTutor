@@ -53,6 +53,12 @@ Spec ambiguity notes (resolved here):
   10-event account").
 * The walk also has a hard 366-day ceiling so a pathological account
   with sparse very-old events cannot OOM the loop.
+* The auto-apply path additionally honors a **session-total** cap
+  (``max_freezes_per_walk``, default 3) — orthogonal to the per-week
+  budget, defense-in-depth against multi-week gap-walks fabricating
+  more saves than one ADHD-week of quota would allow. Bound is
+  enforced in the walker loop's broken-day branch; see
+  ``plan/streak_walker_session_cap_plan.md``.
 """
 
 from __future__ import annotations
@@ -79,6 +85,15 @@ _WALK_MAX_DAYS: int = 366
 # query (which compares ``expires_at > now``) treats streak-saver and
 # card freezes uniformly.
 _FREEZE_HOURS: int = 24
+
+# Test-only bypass for the auto-apply NotImplementedError guard. Tests
+# exercising the inner walker (see ``test_walk_is_bounded`` and the
+# session-cap tests) flip this via monkeypatch; production keeps it
+# False so the live Postgres NOT-NULL invariant is honored. Module-level
+# flag rather than a private kwarg because the guard is at function
+# entry and a kwarg would leak into the public signature. Cross-
+# reference: plan/streak_walker_session_cap_plan.md.
+_TEST_SKIP_INVARIANT_GUARD: bool = False
 
 
 @dataclass(frozen=True)
@@ -235,6 +250,7 @@ async def compute_streak(
     user_id: uuid.UUID,
     today_utc: date | None = None,
     auto_apply_freezes: bool = False,
+    max_freezes_per_walk: int = freeze_service.FREEZE_QUOTA_PER_WEEK,
 ) -> StreakResult:
     """Walk backwards from ``today_utc`` and report the user's current streak.
 
@@ -258,6 +274,16 @@ async def compute_streak(
             pass False; passing True raises :class:`NotImplementedError`
             until the deferred migration lands. See
             ``plan/streak_walker_session_cap_plan.md``.
+        max_freezes_per_walk: Hard ceiling on auto-applied freezes per
+            ``compute_streak()`` call. Defaults to
+            :data:`services.freeze.FREEZE_QUOTA_PER_WEEK` (3) so a single
+            dashboard hit cannot mint more than one ADHD-week of saves
+            even when the walk traverses several ISO weeks. Defense-in-
+            depth alongside the per-week budget — only fires when
+            ``auto_apply_freezes=True``, so production (which always
+            passes False) is unaffected. Phase C streak history may opt
+            into a higher cap explicitly. See
+            ``plan/streak_walker_session_cap_plan.md``.
 
     Raises:
         NotImplementedError: When ``auto_apply_freezes=True``. The
@@ -271,11 +297,14 @@ async def compute_streak(
         caller can render the dashboard counter without a second query.
     """
 
-    if auto_apply_freezes:
+    if auto_apply_freezes and not _TEST_SKIP_INVARIANT_GUARD:
         # Invariant guard — see module docstring "NOT NULL invariant".
         # Production never trips this; flipping the flag without first
         # landing the Alembic migration on populated Postgres would
-        # crash with IntegrityError mid-walk. Fail fast instead.
+        # crash with IntegrityError mid-walk. Fail fast instead. The
+        # ``_TEST_SKIP_INVARIANT_GUARD`` escape hatch is for unit tests
+        # whose SQLite harness relaxes ``freeze_tokens.problem_id`` —
+        # see ``tests/services/test_streak_service.py``.
         raise NotImplementedError(
             "auto_apply_freezes=True is currently unsupported — "
             "FreezeToken.problem_id is NOT NULL in the live schema, "
@@ -356,6 +385,17 @@ async def compute_streak(
 
             # Don't fabricate streaks before the user's first event.
             if day < earliest_event:
+                break
+
+            # Session-total cap on auto-applied freezes — prevents the
+            # walker from forging more than ``max_freezes_per_walk``
+            # freezes per ``compute_streak()`` call regardless of how
+            # many ISO weeks the walk traverses. Without this guard a
+            # multi-week gap-walk could mint ``3 × weeks_walked`` freezes
+            # because each new week refreshes ``weekly_remaining`` from
+            # the freeze service. Cross-reference:
+            # plan/streak_walker_session_cap_plan.md
+            if len(inserted_freezes) >= max_freezes_per_walk:
                 break
 
             # Compute the freeze budget for the ISO week of this day.
