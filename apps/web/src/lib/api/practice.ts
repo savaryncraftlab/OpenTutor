@@ -150,6 +150,11 @@ export interface AnswerResult {
   // problem leaves them null and the chip self-hides.
   interval_days?: number | null;
   next_review_at?: string | null;
+  // Phase C T5 — true iff this submit was the user's FIRST correct rep
+  // on the card (server flips on pre-FSRS reps==0 + is_correct). Drives
+  // the chip's "First time seeing this!" branch. Null when the tracker
+  // failed or the answer was wrong.
+  is_first_review?: boolean | null;
 }
 
 export interface QuizNodeFailure {

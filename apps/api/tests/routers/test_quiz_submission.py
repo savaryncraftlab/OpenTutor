@@ -321,6 +321,85 @@ async def test_correct_answer_unlocks_first_card_badge(session_factory, seeded) 
         )
 
 
+# ── Phase C T5: is_first_review ─────────────────────────────────────
+
+
+def _restore_real_tracker_unstub_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Undo the autouse stub of ``update_quiz_result`` for Phase C T5 tests.
+
+    The base fixture neutralises three collaborators with a single
+    ``monkeypatch`` instance — ``monkeypatch.undo()`` rewinds all of them
+    at once, so we re-stub the analytics + classifier ones that don't
+    matter to T5 but would otherwise hit Groq / write learning events.
+    The tracker is left as the real function — that's the whole point.
+    """
+    monkeypatch.undo()
+
+    import services.analytics.events as events_mod
+    import services.diagnosis.classifier as classifier_mod
+
+    monkeypatch.setattr(events_mod, "emit_quiz_answered", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        classifier_mod,
+        "classify_error",
+        AsyncMock(return_value={"category": "conceptual"}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_is_first_review_true_on_brand_new_card(
+    session_factory, seeded, monkeypatch
+) -> None:
+    """Phase C T5 — submitting a card with no prior LearningProgress
+    sets ``is_first_review=True`` on the response.
+    """
+    _restore_real_tracker_unstub_others(monkeypatch)
+
+    user, _, problem_id = seeded
+
+    async with session_factory() as db:
+        response = await _call_submit(
+            db=db, user=user, problem_id=problem_id, user_answer="4"
+        )
+
+    assert response.is_correct is True
+    # Pre-FSRS rep was 0 (no LearningProgress row existed) AND the
+    # answer is correct → the celebration branch fires.
+    assert response.is_first_review is True
+    # The schedule fields must also be surfaced — the chip uses both.
+    assert response.interval_days is not None and response.interval_days > 0
+
+
+@pytest.mark.asyncio
+async def test_is_first_review_false_on_second_correct_submit(
+    session_factory, seeded, monkeypatch
+) -> None:
+    """Phase C T5 — second submit of the same card must NOT re-celebrate.
+
+    First submit moves ``fsrs_reps`` from 0 → 1; the second submit reads
+    pre-FSRS reps == 1, so ``is_first_review=False`` flips off the
+    novelty branch.
+    """
+    _restore_real_tracker_unstub_others(monkeypatch)
+
+    user, _, problem_id = seeded
+
+    async with session_factory() as db:
+        first = await _call_submit(
+            db=db, user=user, problem_id=problem_id, user_answer="4"
+        )
+    assert first.is_first_review is True
+
+    async with session_factory() as db:
+        second = await _call_submit(
+            db=db, user=user, problem_id=problem_id, user_answer="4"
+        )
+
+    assert second.is_correct is True
+    # Pre-FSRS reps was 1 on this submit, so the celebration is gone.
+    assert second.is_first_review is False
+
+
 @pytest.mark.asyncio
 async def test_submit_succeeds_when_award_all_eligible_raises(
     session_factory, seeded, monkeypatch

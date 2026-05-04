@@ -48,6 +48,15 @@ export interface NextReviewChipProps {
   intervalDays?: number | null;
   /** ISO 8601 datetime string (e.g. ``"2026-05-18T00:00:00Z"``). */
   nextReviewAt?: string | null;
+  /**
+   * Phase C T5 — when true AND `intervalDays > 0`, the chip switches to
+   * a celebratory "First time seeing this!" branch (dopaminergic novelty
+   * signal on the user's first correct rep of a card). Falsy/null falls
+   * back to the standard schedule label. The self-hide guard
+   * (`intervalDays <= 0`) takes precedence so the cap-on-empty case
+   * cannot accidentally render the celebration text.
+   */
+  isFirstReview?: boolean | null;
   className?: string;
 }
 
@@ -64,19 +73,29 @@ function formatWeekdayDate(date: Date): string {
 export function NextReviewChip({
   intervalDays,
   nextReviewAt,
+  isFirstReview,
   className,
 }: NextReviewChipProps) {
   // Architect-plan §5 risk-row 3 — FSRS edge case where stability rounds
   // to 0. The chip must hide rather than print "Returns in 0 days".
+  // This guard runs BEFORE the first-review branch so the cap-on-empty
+  // case cannot leak the celebration text on a malformed schedule.
   if (intervalDays === null || intervalDays === undefined || intervalDays <= 0) {
     return null;
   }
 
-  // Near-term schedules render the weekday/date so "Returns Mon 18 May"
-  // is more legible than "Returns in 14 days". Far-out (> 7 days) keeps
-  // the day count — the weekday gives no extra signal at that horizon.
+  // Phase C T5 — first-correct-rep branch. The dopaminergic intent: on
+  // the *very first* time a learner answers a card correctly, surface
+  // novelty ("you haven't seen this before") instead of the usual
+  // schedule line. We still include the interval so the user knows the
+  // card will return; the celebration text just leads.
   let label: string;
-  if (nextReviewAt && intervalDays <= NEAR_TERM_THRESHOLD_DAYS) {
+  if (isFirstReview === true) {
+    label = `First time seeing this! Returns in ${intervalDays} ${intervalDays === 1 ? "day" : "days"}`;
+  } else if (nextReviewAt && intervalDays <= NEAR_TERM_THRESHOLD_DAYS) {
+    // Near-term schedules render the weekday/date so "Returns Mon 18 May"
+    // is more legible than "Returns in 14 days". Far-out (> 7 days) keeps
+    // the day count — the weekday gives no extra signal at that horizon.
     const parsed = new Date(nextReviewAt);
     if (!Number.isNaN(parsed.getTime())) {
       label = `Returns ${formatWeekdayDate(parsed)}`;
@@ -88,10 +107,19 @@ export function NextReviewChip({
     label = `Returns in ${intervalDays} ${intervalDays === 1 ? "day" : "days"}`;
   }
 
+  // First-review state gets a subtle green tint so the visual matches
+  // the celebratory copy without screaming. Falls back to the muted
+  // chrome-on-grey treatment for the regular schedule branch.
+  const styleClasses =
+    isFirstReview === true
+      ? "border-emerald-300/60 bg-emerald-50 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-950/40 dark:text-emerald-200"
+      : "border-border/60 bg-muted/40 text-muted-foreground";
+
   return (
     <span
       data-testid="next-review-chip"
-      className={`inline-flex items-center rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-[11px] font-medium text-muted-foreground ${className ?? ""}`.trim()}
+      data-first-review={isFirstReview === true ? "true" : undefined}
+      className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-medium ${styleClasses} ${className ?? ""}`.trim()}
     >
       {label}
     </span>

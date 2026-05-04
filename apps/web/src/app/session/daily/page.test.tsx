@@ -75,6 +75,46 @@ function makeRecallCard(
   };
 }
 
+/** Code-exercise card — `problem_metadata.starter_code` carries the seed
+ *  Monaco buffer per `readCodeMeta` in `app/session/daily/page.tsx`. */
+function makeCodeCard(
+  id: string,
+  question: string,
+  metadata: Record<string, unknown>,
+): DailyPlanCard {
+  return {
+    id,
+    question_type: "code_exercise",
+    question,
+    options: null,
+    correct_answer: null,
+    explanation: null,
+    difficulty_layer: 1,
+    content_node_id: null,
+    problem_metadata: metadata,
+  };
+}
+
+/** Trace card — `correct_answer` is the predicted output string the
+ *  TraceBlock reveals on miss. */
+function makeTraceCard(
+  id: string,
+  question: string,
+  correctAnswer: string,
+): DailyPlanCard {
+  return {
+    id,
+    question_type: "trace",
+    question,
+    options: null,
+    correct_answer: correctAnswer,
+    explanation: null,
+    difficulty_layer: 1,
+    content_node_id: null,
+    problem_metadata: null,
+  };
+}
+
 function renderWithProvider() {
   return render(
     <LocaleProvider>
@@ -278,5 +318,80 @@ describe("/session/daily page", () => {
     });
     // Store should NOT have recorded an answer on failure.
     expect(useDailySessionStore.getState().answered).toBe(0);
+  });
+
+  it("renders recall + code_exercise + trace in order across currentIdx advances", async () => {
+    // Phase C extended T3: e2e proof that `select_daily_plan`'s round-robin
+    // across `question_type` (apps/api/services/daily_plan.py:42-50) lands
+    // on the right block per card. Architect plan claims mix-mode review
+    // already works — this is the regression guard that confirms it
+    // end-to-end across `currentIdx` advances.
+    //
+    // We assert ROUTING (right component for each question_type), not
+    // block internals. Code-exercise renders via the file-level stub so
+    // Monaco never has to mount in jsdom; trace-block renders for real
+    // (verified by trace-block.test.tsx — no jsdom workarounds needed).
+    useDailySessionStore
+      .getState()
+      .start(3 as unknown as 5, [
+        makeRecallCard("c1", "What is GIL?", "Global Interpreter Lock"),
+        makeCodeCard("c2", "Write a function that returns 42", {
+          starter_code: "def f():\n    pass",
+        }),
+        makeTraceCard(
+          "c3",
+          "What is x after `x = [1,2,3]; x.append(4)`?",
+          "[1, 2, 3, 4]",
+        ),
+      ]);
+    submitAnswerMock.mockResolvedValue({
+      is_correct: true,
+      correct_answer: "Global Interpreter Lock",
+      explanation: null,
+    });
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderWithProvider();
+
+    // Card 1 (currentIdx=0): recall — textarea + reveal CTA visible, code
+    // and trace blocks must NOT be in the tree.
+    expect(screen.getByTestId("daily-session-recall-input")).toBeInTheDocument();
+    expect(screen.getByTestId("daily-session-recall-reveal")).toBeInTheDocument();
+    expect(screen.queryByTestId("code-block-stub")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("trace-block")).not.toBeInTheDocument();
+
+    // Drive the recall flow → recordAnswer + scheduleAdvance fire.
+    await user.click(screen.getByTestId("daily-session-recall-reveal"));
+    await user.click(screen.getByTestId("daily-session-recall-yes"));
+    await waitFor(() =>
+      expect(useDailySessionStore.getState().answered).toBe(1),
+    );
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    // Card 2 (currentIdx=1): code_exercise — stub renders, recall/trace gone.
+    await waitFor(() => {
+      expect(screen.queryByTestId("daily-session-recall-input")).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("code-block-stub")).toBeInTheDocument();
+    expect(screen.queryByTestId("trace-block")).not.toBeInTheDocument();
+
+    // The code-block stub does NOT call onSubmit, so we advance the cursor
+    // directly via the store. Routing is what's under test, not the inner
+    // submit/run loop (covered by code-exercise-block.test.tsx in-situ).
+    act(() => {
+      useDailySessionStore.getState().advance();
+    });
+
+    // Card 3 (currentIdx=2): trace — TraceBlock root + its prompt render,
+    // code stub gone.
+    await waitFor(() => {
+      expect(screen.getByTestId("trace-block")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("trace-block-prompt")).toBeInTheDocument();
+    expect(screen.getByTestId("trace-block-answer")).toBeInTheDocument();
+    expect(screen.queryByTestId("code-block-stub")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("daily-session-recall-input")).not.toBeInTheDocument();
   });
 });

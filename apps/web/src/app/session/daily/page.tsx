@@ -511,6 +511,7 @@ export default function DailySessionPage() {
           <NextReviewChip
             intervalDays={result.interval_days}
             nextReviewAt={result.next_review_at}
+            isFirstReview={result.is_first_review}
           />
         ) : null}
 

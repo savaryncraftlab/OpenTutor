@@ -43,6 +43,7 @@ import { TaskSidebar } from "@/components/mission/task-sidebar";
 import { CheckpointSection } from "@/components/mission/checkpoint-section";
 import { MissionProgressFooter } from "@/components/mission/mission-progress-footer";
 import { PythonPane } from "@/components/practice/python-pane";
+import { LessonBlock } from "@/components/blocks/lesson-block";
 
 function MissionPageContent() {
   const params = useParams();
@@ -237,15 +238,22 @@ function MissionPageContent() {
               <h1 className="mt-1 font-display text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
                 {data.title}
               </h1>
-              {data.intro_excerpt ? (
-                <p
-                  data-testid="mission-intro-excerpt"
-                  className="mt-2 text-sm leading-relaxed text-[var(--text-secondary,hsl(var(--muted-foreground)))]"
-                >
-                  {data.intro_excerpt}
-                </p>
-              ) : null}
             </div>
+
+            {/* Phase C lesson surface — markdown excerpt + "Start practice"
+                CTA. Self-hides when intro_excerpt is null/blank, so we mount
+                it inline without a wrapper that would reserve empty space.
+                Clicking the CTA scrolls the practice pane into view (cheap
+                DOM scroll, no router work). */}
+            <LessonBlock
+              introExcerpt={data.intro_excerpt}
+              onStartPractice={() => {
+                if (typeof document === "undefined") return;
+                document
+                  .querySelector('[data-testid="mission-practice-pane"]')
+                  ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            />
 
             <CheckpointSection
               capstoneIds={data.capstone_problem_ids}

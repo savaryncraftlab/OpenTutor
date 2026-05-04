@@ -526,9 +526,28 @@ async def submit_answer(
     # 158-179), so reading from the in-memory instance here is the
     # post-FSRS-write value — no re-query needed (avoids the double-write
     # / stale-read risk flagged in the architect plan).
+    #
+    # Phase C T5 — capture ``fsrs_reps`` BEFORE update_quiz_result so we
+    # can tell the chip "this was your first rep". We pre-fetch the row
+    # via the same get_or_create_progress helper the tracker uses; the
+    # SQLAlchemy identity map then makes the tracker's internal call a
+    # no-op cache hit (no double DB roundtrip). On the very first submit
+    # the row is created here at reps=0, which is exactly what we need.
     progress_after_submit = None
+    pre_fsrs_reps: int | None = None
     try:
-        from services.progress.tracker import update_quiz_result
+        from services.progress.tracker import (
+            get_or_create_progress,
+            update_quiz_result,
+        )
+
+        progress_pre = await get_or_create_progress(
+            db,
+            user.id,
+            problem.course_id,
+            problem.content_node_id,
+        )
+        pre_fsrs_reps = progress_pre.fsrs_reps
 
         progress_after_submit = await update_quiz_result(
             db,
@@ -629,6 +648,15 @@ async def submit_answer(
         interval_days = progress_after_submit.interval_days
         next_review_at = progress_after_submit.next_review_at
 
+    # Phase C T5 — derive the "first time seeing this" signal. Two gates:
+    # (1) we must have a pre-FSRS rep count (tracker didn't fail), and
+    # (2) the answer must be correct — a wrong first attempt resets to
+    # relearning and isn't a milestone worth celebrating. ``None`` lets
+    # the chip self-hide gracefully rather than render "False" branding.
+    is_first_review: bool | None = None
+    if pre_fsrs_reps is not None and progress_after_submit is not None:
+        is_first_review = pre_fsrs_reps == 0 and is_correct
+
     return AnswerResponse(
         is_correct=is_correct,
         correct_answer=problem.correct_answer,
@@ -637,6 +665,7 @@ async def submit_answer(
         warnings=warnings,
         interval_days=interval_days,
         next_review_at=next_review_at,
+        is_first_review=is_first_review,
     )
 
 

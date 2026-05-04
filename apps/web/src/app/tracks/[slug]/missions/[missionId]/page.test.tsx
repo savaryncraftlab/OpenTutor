@@ -115,10 +115,16 @@ describe("MissionPage (3-pane)", () => {
       screen.getByTestId("mission-header-breadcrumb-path").textContent,
     ).toBe("Python Fundamentals");
 
-    // Content pane shows the real intro_excerpt (not placeholder).
-    expect(screen.getByTestId("mission-intro-excerpt").textContent).toBe(
+    // Content pane shows the real intro_excerpt rendered through
+    // <LessonBlock> (Phase C lesson surface — replaces the inline <p>).
+    const lesson = screen.getByTestId("mission-lesson");
+    expect(lesson.textContent).toContain(
       "For loops iterate over a sequence.",
     );
+    // CTA also rendered when excerpt is non-empty.
+    expect(
+      screen.getByTestId("mission-lesson-start-practice"),
+    ).toBeInTheDocument();
 
     // Task sidebar renders three rows — there are TWO sidebars in the
     // DOM (one mobile accordion, one xl+ column). Both list t1 and t2,
@@ -201,5 +207,34 @@ describe("MissionPage (3-pane)", () => {
     await waitFor(() => {
       expect(screen.getByTestId("mission-page-error")).toBeInTheDocument();
     });
+  });
+
+  // Phase C T2 — LessonBlock integration
+
+  it("renders intro_excerpt as markdown (h2 for `## Topic`) inside the lesson block", async () => {
+    getRoomDetailMock.mockResolvedValueOnce(
+      buildResponse({ intro_excerpt: "## Loops topic" }),
+    );
+    render(<MissionPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("mission-lesson")).toBeInTheDocument();
+    });
+    // Markdown actually parsed (not just textContent) — h2 element exists.
+    const lesson = screen.getByTestId("mission-lesson");
+    const h2 = lesson.querySelector("h2");
+    expect(h2).not.toBeNull();
+    expect(h2!.textContent).toBe("Loops topic");
+  });
+
+  it("hides the lesson block (no testid, no CTA) when intro_excerpt is null", async () => {
+    getRoomDetailMock.mockResolvedValueOnce(
+      buildResponse({ intro_excerpt: null }),
+    );
+    render(<MissionPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId("mission-header")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("mission-lesson")).toBeNull();
+    expect(screen.queryByTestId("mission-lesson-start-practice")).toBeNull();
   });
 });

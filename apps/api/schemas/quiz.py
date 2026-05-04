@@ -22,7 +22,9 @@ class ExtractRequest(BaseModel):
     course_id: uuid.UUID
     content_node_id: uuid.UUID | None = None
     count: int | None = None
-    mode: str | None = None  # learning mode: course_following, self_paced, exam_prep, maintenance
+    mode: str | None = (
+        None  # learning mode: course_following, self_paced, exam_prep, maintenance
+    )
     difficulty: str | None = None  # easy | medium | hard
 
 
@@ -158,6 +160,13 @@ class AnswerResponse(BaseModel):
     # leaves them None and the chip self-hides on the client.
     interval_days: int | None = None
     next_review_at: datetime | None = None
+    # Phase C T5 — true iff this submit was the user's FIRST correct rep
+    # on the card (pre-FSRS ``fsrs_reps == 0`` AND ``is_correct``). Used by
+    # ``<NextReviewChip>`` to render a celebratory "First time seeing
+    # this!" branch. None when tracker failed (chip self-hides) or when
+    # the answer was wrong (no novelty signal — the wrong-answer banner
+    # already conveys state).
+    is_first_review: bool | None = None
 
 
 class MasterySnapshotResponse(BaseModel):
