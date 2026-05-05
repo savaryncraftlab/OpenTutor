@@ -70,6 +70,13 @@ export interface RoomTask {
   options: Record<string, string> | null;
   is_complete: boolean;
   difficulty_layer: number | null;
+  /** Question-type-specific fields needed by the renderer:
+   *  - ``lab_exercise``: ``target_url`` (Juice Shop URL), ``hints``,
+   *    ``category``, ``difficulty``.
+   *  - ``code_exercise``: ``starter_code``, ``hints``.
+   *  Backend strips ``expected_output`` / ``verification_rubric`` etc.
+   *  before sending — the client never sees the answer pre-submit. */
+  problem_metadata?: Record<string, unknown> | null;
 }
 
 export interface RoomDetailResponse {

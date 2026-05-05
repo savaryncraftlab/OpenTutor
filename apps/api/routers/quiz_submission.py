@@ -105,6 +105,57 @@ def _normalize_rebuild_code(value: str | None) -> str:
     return "\n".join(lines)
 
 
+# ── True/False normalizer ────────────────────────────────────
+#
+# Grader bug #5: TF cards in the python-foundations track store their
+# canonical answer as English "True" / "False" (134 + 227 rows) but UI
+# placeholders ("true or false") and Ukrainian-speaking learners both lead
+# users to type "правда" / "неправда". The previous fallback compared via
+# .strip().lower() which matched English-to-English but never bridged the
+# language gap, rejecting valid Ukrainian answers and forcing a lapse.
+#
+# Map both Ukrainian and English variants (plus common shorthands and
+# 1/0 / y/n / т/н) to a canonical bool token. Use ``.casefold()`` rather
+# than ``.lower()`` because casefold is the Unicode-aware contract for
+# case-insensitive comparison (matters for Ukrainian "І" / "і"; doesn't
+# regress on ASCII).
+_TF_NORMALIZE: dict[str, bool] = {
+    # English
+    "true": True,
+    "false": False,
+    "t": True,
+    "f": False,
+    "yes": True,
+    "no": False,
+    "y": True,
+    "n": False,
+    "1": True,
+    "0": False,
+    # Ukrainian
+    "правда": True,
+    "неправда": False,
+    "так": True,
+    "ні": False,
+    "т": True,
+    "н": False,
+}
+
+
+def _normalize_tf_token(value: str | None) -> bool | None:
+    """Map a TF answer string to a canonical bool, or ``None`` if unrecognised.
+
+    Returning ``None`` (rather than ``False``) for garbage lets the caller
+    fall through to the strict string-compare path so we don't silently mark
+    nonsense answers as wrong-but-valid.
+    """
+    if value is None:
+        return None
+    token = value.strip().casefold()
+    if not token:
+        return None
+    return _TF_NORMALIZE.get(token)
+
+
 router = APIRouter()
 
 
@@ -398,6 +449,21 @@ async def submit_answer(
             except (ValueError, RuntimeError):
                 logger.exception("Drill grading failed (best-effort)")
                 warnings.append("drill_grading_failed")
+    elif problem.question_type == "tf" and problem.correct_answer:
+        # Bug #5 fix: TF answers must compare as bools so Ukrainian "правда"
+        # matches canonical English "True" (and case variants of either).
+        # If EITHER side fails to normalize (non-TF garbage in correct_answer
+        # row, learner typed prose), fall through to strict string-compare so
+        # nonsense answers stay rejected.
+        user_bool = _normalize_tf_token(body.user_answer)
+        ref_bool = _normalize_tf_token(problem.correct_answer)
+        if user_bool is not None and ref_bool is not None:
+            is_correct = user_bool == ref_bool
+        else:
+            is_correct = (
+                body.user_answer.strip().casefold()
+                == problem.correct_answer.strip().casefold()
+            )
     elif problem.correct_answer:
         is_correct = (
             body.user_answer.strip().lower() == problem.correct_answer.strip().lower()

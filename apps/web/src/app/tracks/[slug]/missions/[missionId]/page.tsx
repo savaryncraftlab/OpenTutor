@@ -43,6 +43,7 @@ import { TaskSidebar } from "@/components/mission/task-sidebar";
 import { CheckpointSection } from "@/components/mission/checkpoint-section";
 import { MissionProgressFooter } from "@/components/mission/mission-progress-footer";
 import { PythonPane } from "@/components/practice/python-pane";
+import { HackingLabPane } from "@/components/practice/hacking-lab-pane";
 import { LessonBlock } from "@/components/blocks/lesson-block";
 
 function MissionPageContent() {
@@ -263,12 +264,13 @@ function MissionPageContent() {
           </section>
 
           {/* Right pane — Slice 3 PracticeShell via track-variant pane.
-              Today only the python variant has live missions; English /
-              Hacking paths exist in the catalog but have no missions yet,
-              so the prefix gate is forward-safe rather than user-visible.
-              The pane internally hosts <TaskRenderer> via <PracticeShell>
-              so caption + question + Monaco surface + explain rail all
-              compose in one place. */}
+              Python tracks → <PythonPane> (Monaco + drill blocks).
+              Hacking tracks → <HackingLabPane> (Open-Lab CTA + proof
+              inputs via <LabExerciseBlock>). Both panes wrap the same
+              <TaskRenderer>, just with different cosmetic variants
+              (caption + accent) on the surrounding <PracticeShell>.
+              English / other tracks fall through to the placeholder
+              until their per-track surfaces land. */}
           <section
             data-testid="mission-practice-pane"
             className="min-w-0"
@@ -280,6 +282,19 @@ function MissionPageContent() {
                   // "Next task" CTA latch (and the underlying drill
                   // renderer's selected/result state) starts fresh
                   // for each new task.
+                  key={currentTask.id}
+                  task={currentTask}
+                  correct={currentTask.is_complete}
+                  onCorrect={() => handleTaskCorrect(currentTask.id)}
+                  onAdvance={
+                    currentIdx >= 0 &&
+                    currentIdx < enrichedTasks.length - 1
+                      ? handleNext
+                      : undefined
+                  }
+                />
+              ) : data.path_slug.startsWith("hacking") ? (
+                <HackingLabPane
                   key={currentTask.id}
                   task={currentTask}
                   correct={currentTask.is_complete}

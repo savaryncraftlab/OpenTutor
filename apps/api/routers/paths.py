@@ -149,6 +149,14 @@ class RoomTask(BaseModel):
     client shouldn't be able to peek at the answer by reading network
     traffic before submitting. Those fields come back via the separate
     grading endpoint after a submission.
+
+    ``problem_metadata`` carries question-type-specific fields needed
+    by the renderer: ``target_url`` for ``lab_exercise`` cards (so the
+    Juice Shop iframe / Open Lab link can mount), ``starter_code`` /
+    ``hints`` for code & lab cards, etc. Answer-leaking keys
+    (``expected_output``, ``verification_rubric``, ``correct_answer``)
+    are stripped server-side — the client never sees the rubric before
+    submission.
     """
 
     id: uuid.UUID
@@ -158,6 +166,34 @@ class RoomTask(BaseModel):
     options: Optional[dict] = None
     is_complete: bool
     difficulty_layer: Optional[int] = None
+    problem_metadata: Optional[dict] = None
+
+
+# Keys that the client must never see before submission. Mirrors the
+# server-side rubric in ``schemas/quiz.py`` and ``services/practice/
+# lab_grader.py`` — if the metadata accidentally carries these (e.g.
+# legacy seed rows), strip them on the way out.
+_METADATA_ANSWER_KEYS = frozenset(
+    {
+        "expected_output",
+        "verification_rubric",
+        "correct_answer",
+        "rubric",
+    }
+)
+
+
+def _safe_problem_metadata(
+    raw: Optional[dict],
+) -> Optional[dict]:
+    """Drop answer-leaking keys before exposing metadata to the client."""
+
+    if not raw:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    sanitized = {k: v for k, v in raw.items() if k not in _METADATA_ANSWER_KEYS}
+    return sanitized or None
 
 
 class RoomDetailResponse(BaseModel):
@@ -600,6 +636,7 @@ async def get_room_detail(
             options=t.options,
             is_complete=t.id in completed_ids,
             difficulty_layer=t.difficulty_layer,
+            problem_metadata=_safe_problem_metadata(t.problem_metadata),
         )
         for t in tasks
     ]

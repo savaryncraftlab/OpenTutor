@@ -39,7 +39,6 @@ import {
   type AnswerResult,
   type RoomTask,
 } from "@/lib/api";
-import { ExplainStep } from "@/components/practice/explain-step";
 import { MissBanner } from "@/components/practice/miss-banner";
 import {
   CodeExerciseBlock,
@@ -250,11 +249,11 @@ interface TaskRendererProps {
  * barrel — keep it test-scoped.
  */
 export function TaskRenderer({ task, onCorrect, onAttempt }: TaskRendererProps) {
-  // The RoomTask schema never ships `problem_metadata`; editor tasks
-  // that genuinely need `starter_code` will show an empty editor in
-  // seed-gap scenarios. When Phase 16b adds metadata to the endpoint
-  // we plug it in here without touching the call sites.
-  const meta: Record<string, unknown> | null = null;
+  // ``problem_metadata`` ships answer-free renderer hints — ``target_url``
+  // for hacking lab cards (Juice Shop iframe / Open Lab link), starter
+  // code / hints for editor cards. Server strips ``expected_output`` /
+  // ``verification_rubric`` so the client can't peek at the answer.
+  const meta: Record<string, unknown> | null = task.problem_metadata ?? null;
 
   const handleDrillSubmit = async (answer: string): Promise<AnswerResult> => {
     const res = await submitAnswer(task.id, answer);
@@ -539,9 +538,6 @@ function TextTaskRenderer({
               Correct
               {result.explanation ? ` — ${result.explanation}` : ""}
             </p>
-            <div className="mt-2">
-              <ExplainStep problemId={taskId} correct={true} />
-            </div>
           </div>
         ) : (
           <div data-testid={`text-result-${taskId}`}>
