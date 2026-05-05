@@ -14,7 +14,11 @@ import { GamificationWidget } from "@/components/gamification/gamification-widge
 import { LevelRingCard } from "@/components/dashboard/level-ring-card";
 import { StreakCard } from "@/components/dashboard/streak-card";
 import { HeatmapCard } from "@/components/dashboard/heatmap-card";
+import { StreakCalendarCard } from "@/components/dashboard/streak-calendar-card";
 import { DailyGoalCard } from "@/components/dashboard/daily-goal-card";
+import { XpBreakdownCard } from "@/components/dashboard/xp-breakdown-card";
+import { RecallHealthCard } from "@/components/dashboard/recall-health-card";
+import { RecallForecastCard } from "@/components/dashboard/recall-forecast-card";
 import { WelcomeBackModal } from "@/components/dashboard/welcome-back-modal";
 import { GenerateRoomCTA } from "@/components/dashboard/generate-room-cta";
 import { BadgeShelf } from "@/components/dashboard/badge-shelf";
@@ -335,15 +339,33 @@ export default function DashboardPage() {
                     streakDays={gamification.streak_days}
                     freezesLeft={gamification.streak_freezes_left}
                   />
+                  {/* Slice 5 T1 — recall-health card sits in the same
+                      4-card gamification grid as the level ring + streak
+                      cards. Self-fetches via getRecallHealth(). */}
+                  <RecallHealthCard />
+                  {/* Slice 5 T4 — coming-back-this-week forecast. Sibling
+                      of RecallHealthCard so the two FSRS cards stay paired
+                      on the same support rail. Self-fetches via
+                      getRecallForecast(7). */}
+                  <RecallForecastCard />
                   <HeatmapCard
                     tiles={gamification.heatmap}
                     className="md:col-span-2"
                   />
+                  {/* Slice 5 T3 — per-day streak status calendar over the
+                      trailing 30 days. Sibling to HeatmapCard (XP intensity
+                      vs streak status) — both span the full grid width.
+                      Self-fetches via getStreakCalendar(30). */}
+                  <StreakCalendarCard className="md:col-span-2" />
                   <DailyGoalCard
                     dailyGoalXp={gamification.daily_goal_xp}
                     dailyXpEarned={gamification.daily_xp_earned}
                     className="md:col-span-2"
                   />
+                  {/* Slice 5 T2 — XP-source breakdown for the trailing
+                      7-day window. Self-fetches via getXpBreakdown(7);
+                      same passive-fetch posture as RecallHealth/Forecast. */}
+                  <XpBreakdownCard className="md:col-span-2" />
                 </div>
               )}
 

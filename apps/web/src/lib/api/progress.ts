@@ -109,6 +109,93 @@ export async function triggerConsolidation(courseId?: string): Promise<Record<st
   return request(`/progress/memory-consolidate${params}`, { method: "POST" });
 }
 
+// ── Recall Health (Slice 5 T1) ──
+
+/**
+ * Aggregate FSRS retrievability across the user's flashcard reviews.
+ *
+ * Scope honesty: ``scope`` is the literal ``"flashcards"`` — path-room
+ * missions do NOT carry FSRS state today, so this metric covers
+ * flashcard reviews only. The dashboard card surfaces the same caveat
+ * in its subline text.
+ */
+export interface RecallHealth {
+  total_tracked: number;
+  average_retrievability: number;
+  at_risk_count: number;
+  well_known_count: number;
+  scope: "flashcards";
+}
+
+export async function getRecallHealth(): Promise<RecallHealth> {
+  return request("/progress/recall-health");
+}
+
+// ── Recall Forecast (Slice 5 T4) ──
+
+/**
+ * "Coming back today / this week" forecast — bucketed by FSRS
+ * `next_review_at` plus session-urgency derived from
+ * `estimate_session_urgency` on the backend. Same scope honesty as
+ * recall-health: covers flashcard reviews only.
+ */
+export type RecallForecastUrgency =
+  | "none"
+  | "low"
+  | "normal"
+  | "high"
+  | "critical";
+
+export interface RecallForecast {
+  today_due: number;
+  this_week_due: number;
+  next_week_due: number;
+  expected_forgotten: number;
+  urgency: RecallForecastUrgency;
+  recommendation: string;
+  scope: "flashcards";
+}
+
+export async function getRecallForecast(days = 7): Promise<RecallForecast> {
+  return request(`/progress/recall-forecast?days=${days}`);
+}
+
+// ── Forecast (Slice 5 T4 — today/week + at_risk) ──
+
+/**
+ * "Coming back today / this week" forecast — `GET /api/progress/forecast`.
+ *
+ * Same flashcard-only scope as recall-health: ``scope`` is the literal
+ * ``"flashcards"`` because path-room missions carry no FSRS state. The
+ * dashboard card surfaces the same caveat in its subline ("from
+ * flashcard reviews").
+ *
+ * - ``today_due``     — flashcards due in the next 24 hours.
+ * - ``this_week_due`` — flashcards due in the next ``days`` days
+ *   (default 7). today_due is a subset of this_week_due.
+ * - ``at_risk_count`` — overdue flashcards whose retrievability has
+ *   already dropped below 0.5.
+ */
+export type ForecastUrgency =
+  | "none"
+  | "low"
+  | "normal"
+  | "high"
+  | "critical";
+
+export interface Forecast {
+  scope: "flashcards";
+  today_due: number;
+  this_week_due: number;
+  at_risk_count: number;
+  urgency: ForecastUrgency;
+  recommendation: string;
+}
+
+export async function getForecast(days = 7): Promise<Forecast> {
+  return request(`/progress/forecast?days=${days}`);
+}
+
 // ── Forgetting Forecast ──
 
 export interface ForgettingPrediction {

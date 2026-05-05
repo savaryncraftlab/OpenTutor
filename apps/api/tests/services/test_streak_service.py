@@ -582,3 +582,103 @@ async def test_walk_cap_overridable(db_session, seeded_user, monkeypatch) -> Non
         max_freezes_per_walk=1,
     )
     assert len(result.freezes_used_dates) == 1
+
+
+# ── Slice 5 T3 — compute_streak_calendar ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_calendar_new_account_all_broken_with_today_grace(
+    db_session, seeded_user
+) -> None:
+    """A new account renders ``broken`` for past days and ``grace`` for today.
+
+    No XP, no freezes — past tiles are broken (so the UI can show "you
+    didn't show up"), today is grace because the walker's today-grace
+    rule means a quiet today is not yet a break.
+    """
+
+    result = await streak_service.compute_streak_calendar(
+        db_session, user_id=seeded_user, days=7, today_utc=_ANCHOR_DATE
+    )
+
+    assert result.today == _ANCHOR_DATE
+    assert result.current_streak == 0
+    assert result.freezes_left_this_week == 3  # Phase 14 base quota
+    assert len(result.days) == 7
+    # Oldest first → newest last; today is the last entry.
+    assert result.days[-1].date == _ANCHOR_DATE
+    assert result.days[-1].status == "grace"
+    assert all(t.status == "broken" for t in result.days[:-1])
+
+
+@pytest.mark.asyncio
+async def test_calendar_mixed_status_window(db_session, seeded_user) -> None:
+    """7-day window with one event, one freeze, one gap → mixed statuses.
+
+    Window is days [_ANCHOR_DATE - 6 .. _ANCHOR_DATE] (7 entries).
+    Seed: event on day-3, card freeze on day-2, nothing else. Expected
+    classification:
+
+    * day-3 → ``maintained`` (XP event)
+    * day-2 → ``freeze`` (covered by freeze token, no event)
+    * today (day 0) → ``grace`` (walker keeps today-grace honest)
+    * everything else → ``broken``
+    """
+
+    day_3 = _ANCHOR_DATE - timedelta(days=3)
+    day_2 = _ANCHOR_DATE - timedelta(days=2)
+
+    await _add_event(db_session, user_id=seeded_user, day=day_3, amount=5)
+    await _add_freeze(db_session, user_id=seeded_user, day=day_2)
+
+    result = await streak_service.compute_streak_calendar(
+        db_session, user_id=seeded_user, days=7, today_utc=_ANCHOR_DATE
+    )
+
+    by_date = {tile.date: tile.status for tile in result.days}
+    assert by_date[day_3] == "maintained"
+    assert by_date[day_2] == "freeze"
+    assert by_date[_ANCHOR_DATE] == "grace"
+    # Spot-check a non-event day in the past — must read as broken.
+    assert by_date[_ANCHOR_DATE - timedelta(days=5)] == "broken"
+
+
+@pytest.mark.asyncio
+async def test_calendar_event_today_is_maintained_not_grace(
+    db_session, seeded_user
+) -> None:
+    """When today has an event, today's status is ``maintained`` (not grace).
+
+    Grace only applies to a quiet today. A real event must always
+    classify the day as maintained so the UI doesn't paint a green-day
+    grey just because it's the rightmost tile.
+    """
+
+    await _add_event(
+        db_session, user_id=seeded_user, day=_ANCHOR_DATE, amount=10
+    )
+
+    result = await streak_service.compute_streak_calendar(
+        db_session, user_id=seeded_user, days=3, today_utc=_ANCHOR_DATE
+    )
+
+    assert result.days[-1].date == _ANCHOR_DATE
+    assert result.days[-1].status == "maintained"
+    assert result.current_streak == 1
+
+
+@pytest.mark.asyncio
+async def test_calendar_days_clamped_to_minimum_one(db_session, seeded_user) -> None:
+    """``days < 1`` clamps to a single-tile (today) window.
+
+    The router enforces ``ge=1`` via Query so production never trips
+    this, but the helper itself is permissive — easier to reason about
+    than a raise on a misconfigured caller.
+    """
+
+    result = await streak_service.compute_streak_calendar(
+        db_session, user_id=seeded_user, days=0, today_utc=_ANCHOR_DATE
+    )
+    assert len(result.days) == 1
+    assert result.days[0].date == _ANCHOR_DATE

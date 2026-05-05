@@ -186,6 +186,10 @@ async def _fetch_xp_active_dates(
     return active
 
 
+# NOTE: routers/gamification.py /streak-calendar duplicates the
+# `_fetch_active_freeze_dates` query shape (Slice 5 T3 risk note).
+# Refactor in lock-step — promoting this helper to public would
+# also require updating that consumer.
 async def _fetch_active_freeze_dates(
     db: AsyncSession,
     *,
@@ -457,4 +461,137 @@ async def compute_streak(
     )
 
 
-__all__ = ["StreakResult", "compute_streak"]
+@dataclass(frozen=True)
+class StreakCalendarDay:
+    """One day in the streak-calendar response.
+
+    Status semantics (Slice 5 T3):
+
+    * ``"maintained"`` — the user has a positive XP event on this UTC
+      day. Walks the same ``xp_events.amount > 0`` filter the streak
+      service uses, so the calendar agrees with ``compute_streak``.
+    * ``"freeze"`` — no XP event but a ``FreezeToken`` covers the day
+      (card freeze or streak-saver). The frontend renders this as the
+      "blue flame" per ТЗ line 154.
+    * ``"grace"`` — today only, when no event and no freeze yet exist.
+      Matches the streak walker's today-grace rule (a quiet today does
+      not break a prior streak).
+    * ``"broken"`` — past day with neither event nor freeze. Renders as
+      a muted tile so Юрій can see which day slipped.
+    * ``"future"`` — for a window that extends past today (only used
+      when the caller asks for ``days`` larger than the trailing
+      window; today is the right edge in the default contract).
+
+    ``date`` is a real :class:`datetime.date` so pydantic emits the ISO
+    ``YYYY-MM-DD`` shape automatically and tests can do date arithmetic
+    without re-parsing.
+    """
+
+    date: date
+    status: str  # one of: maintained | freeze | broken | grace | future
+
+
+@dataclass(frozen=True)
+class StreakCalendarResult:
+    """Outcome of a single :func:`compute_streak_calendar` call."""
+
+    today: date
+    current_streak: int
+    freezes_left_this_week: int
+    days: list[StreakCalendarDay]
+
+
+async def compute_streak_calendar(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    days: int,
+    today_utc: date | None = None,
+) -> StreakCalendarResult:
+    """Build a per-day status calendar for the trailing ``days`` window.
+
+    The window ends at ``today_utc`` (inclusive) and walks ``days - 1``
+    days into the past. Days with positive XP are "maintained"; days
+    covered by a freeze token (and not by an event) are "freeze"; today
+    with neither is "grace"; past days with neither are "broken".
+
+    The ``current_streak`` and ``freezes_left_this_week`` fields are
+    computed via :func:`compute_streak` (``auto_apply_freezes=False``)
+    so the calendar agrees with the streak chip on the TopBar — same
+    walk, same numbers.
+
+    Args:
+        db: Active async SQLAlchemy session.
+        user_id: User whose calendar to compute.
+        days: Trailing-window size in days. Caller-clamped to ``[1, 90]``
+            at the router; the helper itself is permissive so tests can
+            assert on tiny windows.
+        today_utc: Override "today" for deterministic walks; defaults to
+            real ``utcnow().date()``.
+
+    Returns:
+        :class:`StreakCalendarResult` — ``days`` is ordered oldest →
+        newest so the frontend grid iterates left-to-right with no
+        extra sort. New accounts (no events, no freezes) come back with
+        all "broken" tiles plus today as "grace".
+    """
+
+    if days < 1:
+        # Defensive — router clamps this; treat <1 as "today only"
+        # rather than raising so a misconfigured caller still gets a
+        # renderable shape.
+        days = 1
+
+    today = today_utc or utcnow().date()
+    earliest = today - timedelta(days=days - 1)
+
+    # Reuse the same private helpers compute_streak uses, so the
+    # calendar can never disagree with the streak walk on the
+    # MAINTAINED/FREEZE classification of any given day.
+    xp_dates = await _fetch_xp_active_dates(
+        db, user_id=user_id, earliest=earliest, latest=today
+    )
+    freeze_dates = await _fetch_active_freeze_dates(db, user_id=user_id)
+
+    streak_result = await compute_streak(
+        db,
+        user_id=user_id,
+        today_utc=today,
+        auto_apply_freezes=False,
+    )
+
+    tiles: list[StreakCalendarDay] = []
+    for offset in range(days - 1, -1, -1):
+        day = today - timedelta(days=offset)
+        if day in xp_dates:
+            status = "maintained"
+        elif day in freeze_dates:
+            status = "freeze"
+        elif day == today:
+            # Today's grace mirrors the walker's rule — a quiet today
+            # does not break a prior streak. Render as a distinct tile
+            # so the UI can highlight "still time today".
+            status = "grace"
+        elif day > today:
+            # Defensive — only reachable if a future caller passes a
+            # forward-shifted today_utc; current routes never do.
+            status = "future"
+        else:
+            status = "broken"
+        tiles.append(StreakCalendarDay(date=day, status=status))
+
+    return StreakCalendarResult(
+        today=today,
+        current_streak=streak_result.streak_days,
+        freezes_left_this_week=streak_result.freezes_left_this_week,
+        days=tiles,
+    )
+
+
+__all__ = [
+    "StreakCalendarDay",
+    "StreakCalendarResult",
+    "StreakResult",
+    "compute_streak",
+    "compute_streak_calendar",
+]

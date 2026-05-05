@@ -12,6 +12,10 @@ const NAV_ITEMS = [
   { href: "/tracks", label: "Tracks" },
   { href: "/session/daily", label: "Review" },
   { href: "/recap", label: "Recap" },
+  // Slice 5 T5 — link the new aggregate progress page from the same
+  // top-bar nav as Tracks/Review/Recap. Sits at the right end so the
+  // existing daily-flow links stay leftmost in scan order.
+  { href: "/profile/progress", label: "Progress" },
 ];
 
 // Chip mirrors the passive-status posture of <GamificationWidget>:

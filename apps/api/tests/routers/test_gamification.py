@@ -585,3 +585,114 @@ def test_xp_to_next_level_at_band_boundaries() -> None:
     assert _xp_to_next_level(2000) == 3000  # Gold → Platinum (5000)
     assert _xp_to_next_level(5000) == 5000  # Platinum → Diamond (10000)
     assert _xp_to_next_level(50_000) == 0  # deep in open Diamond band
+
+
+# ── 10. XP breakdown — Slice 5 T2 ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_xp_breakdown_groups_by_source(client_with_db) -> None:
+    """Multi-source events in the window aggregate per source, XP DESC.
+
+    Three sources seeded inside the 7-day window — practice_result
+    (320 XP, 32 events), room_complete (100 XP, 1 event), streak
+    (60 XP, 6 events) — must come back ordered by XP descending.
+    """
+
+    ac, factory = client_with_db
+    user_id = await _seed_user(factory)
+
+    today = datetime.now(timezone.utc)
+    # 32 practice_result events @ 10 XP each, spread across 4 days so
+    # the per-day uniqueness index never trips (different source_id per
+    # row already keeps it loose, but staying defensive on day spread).
+    for offset in range(4):
+        for _ in range(8):
+            await _seed_xp_event(
+                factory,
+                user_id=user_id,
+                amount=10,
+                earned_at=today - timedelta(days=offset, hours=1),
+                source="practice_result",
+            )
+    # 1 room_complete @ 100 XP today.
+    await _seed_xp_event(
+        factory,
+        user_id=user_id,
+        amount=100,
+        earned_at=today,
+        source="room_complete",
+    )
+    # 6 streak events @ 10 XP each, one per day across the window.
+    for offset in range(6):
+        await _seed_xp_event(
+            factory,
+            user_id=user_id,
+            amount=10,
+            earned_at=today - timedelta(days=offset, hours=2),
+            source="streak",
+        )
+
+    resp = await ac.get("/api/gamification/xp-breakdown?days=7")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["window_days"] == 7
+    assert body["total_xp"] == 320 + 100 + 60
+    by_source = {e["source"]: e for e in body["by_source"]}
+    assert by_source["practice_result"]["xp"] == 320
+    assert by_source["practice_result"]["count"] == 32
+    assert by_source["room_complete"]["xp"] == 100
+    assert by_source["room_complete"]["count"] == 1
+    assert by_source["streak"]["xp"] == 60
+    assert by_source["streak"]["count"] == 6
+    # Ordered XP DESC so the dominant slice renders first.
+    sources_in_order = [e["source"] for e in body["by_source"]]
+    assert sources_in_order == ["practice_result", "room_complete", "streak"]
+
+
+@pytest.mark.asyncio
+async def test_xp_breakdown_empty_window_returns_zeros(client_with_db) -> None:
+    """A user with no XP events in the window → total=0, empty array."""
+
+    ac, factory = client_with_db
+    await _seed_user(factory)
+
+    resp = await ac.get("/api/gamification/xp-breakdown?days=7")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body == {"window_days": 7, "total_xp": 0, "by_source": []}
+
+
+@pytest.mark.asyncio
+async def test_xp_breakdown_excludes_events_before_window(client_with_db) -> None:
+    """Events older than the window must NOT count — Slice 5 T2 contract.
+
+    Seeds one in-window event (today) and one stale event (10 days ago)
+    while requesting a 7-day window. Only the in-window event surfaces.
+    """
+
+    ac, factory = client_with_db
+    user_id = await _seed_user(factory)
+
+    today = datetime.now(timezone.utc)
+    await _seed_xp_event(
+        factory,
+        user_id=user_id,
+        amount=15,
+        earned_at=today,
+        source="practice_result",
+    )
+    await _seed_xp_event(
+        factory,
+        user_id=user_id,
+        amount=99,
+        earned_at=today - timedelta(days=10),
+        source="practice_result",
+    )
+
+    resp = await ac.get("/api/gamification/xp-breakdown?days=7")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total_xp"] == 15
+    assert len(body["by_source"]) == 1
+    assert body["by_source"][0]["xp"] == 15

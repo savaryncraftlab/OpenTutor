@@ -94,6 +94,77 @@ class GamificationDashboard(BaseModel):
     active_paths: list[ActivePathSummary]
 
 
+class XpBreakdownEntry(BaseModel):
+    """One row of the XP-breakdown card payload (Slice 5 T2).
+
+    A user's XP-source mix in a trailing window — e.g. how many XP +
+    how many events came from ``"practice_result"`` vs
+    ``"room_complete"`` vs ``"streak"``. ``count`` is "events that
+    contributed to ``xp``" so the frontend can show "32 events" without
+    a second round-trip.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    source: str
+    xp: int = Field(..., ge=0)
+    count: int = Field(..., ge=0)
+
+
+class XpBreakdownResponse(BaseModel):
+    """Top-level payload for ``GET /api/gamification/xp-breakdown`` (Slice 5 T2).
+
+    Always 200. Empty windows return ``total_xp == 0`` and an empty
+    ``by_source`` array — the dashboard card uses that to render a
+    calm "no XP this week — start a session to earn some" empty state.
+    ``window_days`` echoes the resolved window so the caller can label
+    the card without re-tracking the request input.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    window_days: int = Field(..., ge=1)
+    total_xp: int = Field(..., ge=0)
+    by_source: list[XpBreakdownEntry]
+
+
+class StreakCalendarTile(BaseModel):
+    """One day on the streak calendar (Slice 5 T3).
+
+    ``status`` is one of ``maintained``, ``freeze``, ``broken``,
+    ``grace`` (today, no event/freeze), ``future`` (only when the caller
+    asks for a forward-shifted window — currently unused by the live
+    route). Frontend maps the status to a color token; see
+    ``streak-calendar-card.tsx``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    date: date
+    status: str = Field(
+        ...,
+        pattern="^(maintained|freeze|broken|grace|future)$",
+        description="One of: maintained | freeze | broken | grace | future",
+    )
+
+
+class StreakCalendarResponse(BaseModel):
+    """Top-level payload for ``GET /api/gamification/streak-calendar``.
+
+    The window ends at ``today`` (inclusive) and runs ``len(days)``
+    entries in oldest→newest order. ``current_streak`` and
+    ``freezes_left_this_week`` mirror what the streak chip on the
+    TopBar shows so the calendar card and chip never disagree.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    today: date
+    current_streak: int = Field(..., ge=0)
+    freezes_left_this_week: int = Field(..., ge=0)
+    days: list[StreakCalendarTile]
+
+
 class BadgeOut(BaseModel):
     """One badge entry on the badges endpoint.
 
@@ -140,4 +211,8 @@ __all__ = [
     "BadgesResponse",
     "GamificationDashboard",
     "HeatmapTile",
+    "StreakCalendarResponse",
+    "StreakCalendarTile",
+    "XpBreakdownEntry",
+    "XpBreakdownResponse",
 ]

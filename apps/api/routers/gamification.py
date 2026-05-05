@@ -34,7 +34,7 @@ from datetime import date as date_cls
 from datetime import datetime, time, timedelta, timezone
 from typing import Iterable
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,12 +44,17 @@ from models.learning_path import LearningPath, PathRoom
 from models.practice import PracticeProblem, PracticeResult
 from models.preference import UserPreference
 from models.user import User
+from models.xp_event import XpEvent
 from schemas.gamification import (
     ActivePathSummary,
     BadgeOut,
     BadgesResponse,
     GamificationDashboard,
     HeatmapTile,
+    StreakCalendarResponse,
+    StreakCalendarTile,
+    XpBreakdownEntry,
+    XpBreakdownResponse,
 )
 from services import freeze as freeze_service
 from services import streak_service, xp_service
@@ -391,6 +396,144 @@ async def get_dashboard(
         daily_xp_earned=daily_earned,
         heatmap=heatmap,
         active_paths=active_paths,
+    )
+
+
+# Slice 5 T2 — bound the user-supplied window. 1 day floor (anything
+# shorter is a UI bug, not a real ask) and 90-day ceiling (the heatmap
+# itself stops at 365, but the card is "this week / month" surface;
+# longer windows belong on a dedicated trend page that doesn't exist
+# yet). Defaulting to 7d matches the card's "XP this week" framing.
+_XP_BREAKDOWN_DEFAULT_DAYS: int = 7
+_XP_BREAKDOWN_MAX_DAYS: int = 90
+
+
+@router.get(
+    "/xp-breakdown",
+    response_model=XpBreakdownResponse,
+    summary="Per-source XP breakdown for a trailing window",
+    description=(
+        "Returns the user's XP totals grouped by ``xp_events.source`` "
+        "over the trailing ``days`` window (default 7). Always 200 — "
+        "empty windows come back with ``total_xp == 0`` and an empty "
+        "``by_source`` array. Sources are emitted ordered XP DESC so "
+        "the frontend can render the dominant slice first without "
+        "re-sorting."
+    ),
+)
+async def get_xp_breakdown(
+    days: int = Query(
+        default=_XP_BREAKDOWN_DEFAULT_DAYS,
+        ge=1,
+        le=_XP_BREAKDOWN_MAX_DAYS,
+        description="Trailing window in days (1..90, default 7).",
+    ),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> XpBreakdownResponse:
+    """Return XP grouped by source over the last ``days`` days.
+
+    Single round-trip: one ``GROUP BY source`` over ``xp_events`` filtered
+    by ``user_id`` + ``earned_at`` window. Negative-amount rows
+    (consolation deductions in theory; none today, but the CHECK
+    constraint allows -5..200) are skipped via ``amount > 0`` so the
+    bar chart never reads "negative XP from streak". The window is
+    inclusive on both ends to mirror ``get_xp_events_in_range`` —
+    ``earned_at >= now - days`` AND ``earned_at <= now``.
+    """
+
+    now = utcnow()
+    window_start = now - timedelta(days=days)
+
+    stmt = (
+        select(
+            XpEvent.source,
+            func.coalesce(func.sum(XpEvent.amount), 0).label("xp"),
+            func.count(XpEvent.id).label("count"),
+        )
+        .where(
+            XpEvent.user_id == user.id,
+            XpEvent.amount > 0,
+            XpEvent.earned_at >= window_start,
+            XpEvent.earned_at <= now,
+        )
+        .group_by(XpEvent.source)
+        .order_by(func.sum(XpEvent.amount).desc())
+    )
+    rows = (await db.execute(stmt)).all()
+
+    by_source = [
+        XpBreakdownEntry(source=str(source), xp=int(xp or 0), count=int(count or 0))
+        for source, xp, count in rows
+    ]
+    total_xp = sum(entry.xp for entry in by_source)
+
+    return XpBreakdownResponse(
+        window_days=days,
+        total_xp=total_xp,
+        by_source=by_source,
+    )
+
+
+# ── Slice 5 T3 — streak calendar window ─────────────────────────────
+# Default and ceiling for the ``days`` query param. Default mirrors the
+# spec ("last ~30 days"); ceiling is bounded so a malicious caller
+# cannot ask for a 10-year window and force a very large response. The
+# 90-day ceiling is generous enough for "expand to 90 days" while
+# staying inside the same per-day arithmetic the streak walker tolerates.
+_STREAK_CALENDAR_DEFAULT_DAYS: int = 30
+_STREAK_CALENDAR_MAX_DAYS: int = 90
+
+
+@router.get(
+    "/streak-calendar",
+    response_model=StreakCalendarResponse,
+    summary="Per-day streak status calendar for a trailing window",
+    description=(
+        "Returns the trailing ``days``-day calendar (default 30, max 90) "
+        "with each day classified as ``maintained`` / ``freeze`` / "
+        "``broken`` / ``grace`` (today only). Always 200 — new accounts "
+        "come back with all ``broken`` tiles plus today as ``grace``. "
+        "``current_streak`` and ``freezes_left_this_week`` mirror the "
+        "TopBar streak chip so the calendar card and chip never disagree."
+    ),
+)
+async def get_streak_calendar(
+    days: int = Query(
+        default=_STREAK_CALENDAR_DEFAULT_DAYS,
+        ge=1,
+        le=_STREAK_CALENDAR_MAX_DAYS,
+        description=(
+            "Trailing window size in days (1..90, default 30). The "
+            "window ends at today (UTC) and walks back ``days - 1`` days."
+        ),
+    ),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreakCalendarResponse:
+    """Return the per-day streak status calendar for the trailing window.
+
+    Delegates to :func:`services.streak_service.compute_streak_calendar`,
+    which reuses the same private XP/freeze date helpers the streak
+    walk uses — so the calendar's ``maintained`` / ``freeze`` set agrees
+    with the walker on every day. ``auto_apply_freezes=False`` is
+    enforced inside the helper so this read-only endpoint cannot
+    consume freeze budget.
+    """
+
+    result = await streak_service.compute_streak_calendar(
+        db, user_id=user.id, days=days
+    )
+
+    tiles = [
+        StreakCalendarTile(date=tile.date, status=tile.status)
+        for tile in result.days
+    ]
+    return StreakCalendarResponse(
+        today=result.today,
+        current_streak=result.current_streak,
+        freezes_left_this_week=result.freezes_left_this_week,
+        days=tiles,
     )
 
 

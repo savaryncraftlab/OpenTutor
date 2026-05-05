@@ -99,6 +99,10 @@ vi.mock("@/components/dashboard/heatmap-card", () => ({
   HeatmapCard: () => <div data-testid="heatmap-card" />,
 }));
 
+vi.mock("@/components/dashboard/streak-calendar-card", () => ({
+  StreakCalendarCard: () => <div data-testid="streak-calendar-card" />,
+}));
+
 vi.mock("@/components/dashboard/daily-goal-card", () => ({
   DailyGoalCard: (props: { dailyGoalXp: number; dailyXpEarned: number }) => (
     <div
@@ -107,6 +111,10 @@ vi.mock("@/components/dashboard/daily-goal-card", () => ({
       data-earned={String(props.dailyXpEarned)}
     />
   ),
+}));
+
+vi.mock("@/components/dashboard/xp-breakdown-card", () => ({
+  XpBreakdownCard: () => <div data-testid="xp-breakdown-card" />,
 }));
 
 vi.mock("@/lib/api/gamification", () => ({

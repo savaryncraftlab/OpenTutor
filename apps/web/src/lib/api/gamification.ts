@@ -97,6 +97,120 @@ export async function getGamificationDashboard(): Promise<GamificationDashboard>
 }
 
 /**
+ * One row of the XP-breakdown card payload (Slice 5 T2).
+ *
+ * `source` matches the wire string in `xp_events.source` — known values
+ * are `"practice_result"`, `"room_complete"`, `"hacking_room_complete"`,
+ * `"streak"`, `"manual"`, plus whatever future awarders add. The card
+ * uses `source` for color-token lookup and falls back to muted gray for
+ * unknown sources.
+ */
+export interface XpBreakdownEntry {
+  source: string;
+  xp: number;
+  count: number;
+}
+
+/** Response shape for `GET /api/gamification/xp-breakdown` (Slice 5 T2). */
+export interface XpBreakdown {
+  window_days: number;
+  total_xp: number;
+  by_source: XpBreakdownEntry[];
+}
+
+/**
+ * `GET /api/gamification/xp-breakdown?days={days}` — per-source XP
+ * breakdown over the trailing window (default 7d). Same passive-fetch
+ * posture as `getGamificationDashboard`: bypass the global toast wrapper
+ * so a transient 5xx renders inline instead of firing a global error.
+ */
+export async function getXpBreakdown(days = 7): Promise<XpBreakdown> {
+  const init = buildSecureRequestInit({ method: "GET" });
+  const url = `${API_BASE}/gamification/xp-breakdown?days=${encodeURIComponent(days)}`;
+  const res = await fetch(url, init);
+
+  if (res.ok) {
+    return (await res.json()) as XpBreakdown;
+  }
+
+  let body: ErrorBodyShape = {};
+  try {
+    body = (await res.json()) as ErrorBodyShape;
+  } catch {
+    // Response had no JSON body — keep default {}.
+  }
+  const fallback = res.statusText || `HTTP ${res.status}`;
+  const err: GamificationApiError = {
+    status: res.status,
+    message: describeError(body, fallback),
+  };
+  throw err;
+}
+
+/**
+ * Per-day status on the streak calendar (Slice 5 T3).
+ *
+ * Backend pinky-promises this is one of the listed string literals — the
+ * pydantic schema enforces it via regex. We model it as a TS union so
+ * `status === "maintained"` narrows correctly inside the card component.
+ */
+export type StreakCalendarStatus =
+  | "maintained"
+  | "freeze"
+  | "broken"
+  | "grace"
+  | "future";
+
+export interface StreakCalendarTile {
+  /** ISO date string (`YYYY-MM-DD`) in UTC. */
+  date: string;
+  status: StreakCalendarStatus;
+}
+
+export interface StreakCalendarResponse {
+  /** ISO date string (`YYYY-MM-DD`) — right edge of the window. */
+  today: string;
+  current_streak: number;
+  freezes_left_this_week: number;
+  /** Oldest → newest; `today` is always the last entry. */
+  days: StreakCalendarTile[];
+}
+
+/**
+ * `GET /api/gamification/streak-calendar?days={days}` — per-day status
+ * calendar for the trailing window (default 30 server-side, max 90).
+ * Same passive-fetch posture as `getGamificationDashboard`: bypass the
+ * global toast wrapper so a transient 5xx renders inline.
+ */
+export async function getStreakCalendar(
+  days?: number,
+): Promise<StreakCalendarResponse> {
+  const init = buildSecureRequestInit({ method: "GET" });
+  const query = days !== undefined ? `?days=${encodeURIComponent(days)}` : "";
+  const res = await fetch(
+    `${API_BASE}/gamification/streak-calendar${query}`,
+    init,
+  );
+
+  if (res.ok) {
+    return (await res.json()) as StreakCalendarResponse;
+  }
+
+  let body: ErrorBodyShape = {};
+  try {
+    body = (await res.json()) as ErrorBodyShape;
+  } catch {
+    // Response had no JSON body — keep default {}.
+  }
+  const fallback = res.statusText || `HTTP ${res.status}`;
+  const err: GamificationApiError = {
+    status: res.status,
+    message: describeError(body, fallback),
+  };
+  throw err;
+}
+
+/**
  * Badge catalog entry returned by `GET /api/gamification/badges`
  * (Phase 16c Bundle C — Subagent A backend, Subagent B frontend).
  *
