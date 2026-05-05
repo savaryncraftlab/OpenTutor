@@ -5,7 +5,6 @@ import type { AnswerResult } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
-import { ExplainStep } from "@/components/practice/explain-step";
 import { MissBanner } from "@/components/practice/miss-banner";
 
 export interface TraceBlockProps {
@@ -14,7 +13,7 @@ export interface TraceBlockProps {
   correctAnswer?: string | null;
   /** Optional course/track id for the "Add to review" link in the
    *  miss banner. When absent, the link is suppressed but the banner
-   *  + ExplainStep still render (Slice 3 Path B). */
+   *  still renders (Slice 3 Path B). */
   courseId?: string;
   className?: string;
   onSubmit: (answer: string) => Promise<AnswerResult>;
@@ -132,9 +131,6 @@ export function TraceBlock({
                 {result.explanation}
               </p>
             ) : null}
-            <div className="mt-3">
-              <ExplainStep problemId={problemId} correct={true} />
-            </div>
             {onAdvance ? (
               <div className="mt-3">
                 <Button

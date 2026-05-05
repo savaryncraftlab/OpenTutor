@@ -38,7 +38,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ExplainStep } from "@/components/practice/explain-step";
 import { MissBanner } from "@/components/practice/miss-banner";
 
 /** Localhost URL regex — mirrors apps/api/schemas/quiz.py:_LOCALHOST_URL_RE. */
@@ -321,9 +320,6 @@ export function LabExerciseBlock({
                 {result.explanation}
               </p>
             ) : null}
-            <div className="mt-3">
-              <ExplainStep problemId={problemId} correct={true} />
-            </div>
             {onAdvance ? (
               <div className="mt-3">
                 <Button

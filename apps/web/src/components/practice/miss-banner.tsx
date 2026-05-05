@@ -5,9 +5,10 @@
  *
  * Composes on top of the existing block-specific wrong-state UI rather
  * than replacing it (critic C6). Renders an amber-toned strip with the
- * canonical "Miss. Answer: {x}" copy (ТЗ §10 line 906) plus inline
- * pills: `<AddToReviewLink>` and `<ExplainStep>` in expanded form (the
- * miss state — auto-focused, per C1).
+ * canonical "Miss. Answer: {x}" copy (ТЗ §10 line 906) plus an inline
+ * `<AddToReviewLink>` pill. The shared `<ExplainStep>` rail is owned by
+ * `<PracticeShell>` (single canonical mount); the banner deliberately
+ * does NOT mount its own to avoid duplication (UI bug #1).
  *
  * Children slot underneath the banner so per-block details (diff, code
  * reveal, justification feedback, etc.) keep rendering exactly as they
@@ -23,7 +24,6 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { AddToReviewLink } from "./add-to-review-link";
-import { ExplainStep } from "./explain-step";
 
 export interface MissBannerProps {
   problemId: string;
@@ -83,10 +83,6 @@ export function MissBanner({
       </div>
 
       {children ? <div className="mt-2">{children}</div> : null}
-
-      <div className="mt-3">
-        <ExplainStep problemId={problemId} correct={false} />
-      </div>
     </div>
   );
 }

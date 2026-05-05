@@ -31,7 +31,9 @@ describe("MissBanner", () => {
     );
   });
 
-  it("wires both the AddToReviewLink and the ExplainStep widgets", () => {
+  it("wires the AddToReviewLink pill and does NOT mount its own ExplainStep", () => {
+    // UI bug #1 fix: the explain rail is owned by `<PracticeShell>` —
+    // MissBanner must not mount a second one (would duplicate per task).
     render(
       <MissBanner
         problemId="p3"
@@ -40,9 +42,7 @@ describe("MissBanner", () => {
       />,
     );
     expect(screen.getByTestId("add-to-review-link-p3")).toBeInTheDocument();
-    // ExplainStep on miss starts expanded so the textarea renders inline.
-    expect(
-      screen.getByTestId("explain-step-textarea-p3"),
-    ).toBeInTheDocument();
+    expect(screen.queryByTestId("explain-step-p3")).toBeNull();
+    expect(screen.queryByTestId("explain-step-textarea-p3")).toBeNull();
   });
 });

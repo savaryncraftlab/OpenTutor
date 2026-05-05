@@ -31,7 +31,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ExplainStep } from "@/components/practice/explain-step";
 import { MissBanner } from "@/components/practice/miss-banner";
 
 // Monaco MUST load client-only — its worker setup touches `window`.
@@ -386,9 +385,6 @@ export function CodeExerciseBlock({
                 {result.explanation}
               </p>
             ) : null}
-            <div className="mt-3">
-              <ExplainStep problemId={problemId} correct={true} />
-            </div>
             {onAdvance ? (
               <div className="mt-3">
                 <Button

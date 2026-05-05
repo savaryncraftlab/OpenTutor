@@ -72,6 +72,43 @@ describe("PracticeShell", () => {
     expect(screen.getByTestId("explain-step-textarea-p3")).toBeInTheDocument();
   });
 
+  it("mounts exactly one explain rail regardless of the correct prop", () => {
+    // UI bug #1 fix: per-block surfaces and MissBanner used to mount
+    // their own `<ExplainStep>`, doubling the rail per task. The shell
+    // is now the single canonical mount — verify both branches render
+    // it exactly once (collapsed pill on correct, textarea on miss).
+    const { rerender, container } = render(
+      <PracticeShell
+        problemId="p-once"
+        variant="python"
+        question="Q"
+        surface={<div />}
+        correct={true}
+        onSubmit={() => undefined}
+      />,
+    );
+    expect(
+      container.querySelectorAll('[data-testid="explain-step-p-once"]'),
+    ).toHaveLength(1);
+    expect(
+      screen.getByTestId("explain-step-expand-p-once"),
+    ).toBeInTheDocument();
+
+    rerender(
+      <PracticeShell
+        problemId="p-once"
+        variant="python"
+        question="Q"
+        surface={<div />}
+        correct={false}
+        onSubmit={() => undefined}
+      />,
+    );
+    expect(
+      container.querySelectorAll('[data-testid="explain-step-p-once"]'),
+    ).toHaveLength(1);
+  });
+
   it("fires onSubmit when the primary CTA is clicked", () => {
     const handleSubmit = vi.fn();
     render(
