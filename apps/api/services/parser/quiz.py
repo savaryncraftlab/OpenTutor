@@ -54,6 +54,32 @@ Given the content below, extract or generate practice questions. Follow these ru
    - layer_justification: one short reason for the difficulty_layer choice
    - skill_focus: what ability is being tested (for example recall, comparison, derivation, interpretation)
    - source_section: the section title if obvious from context
+7. Escape sequences in code output:
+   - When a question references the printed output of escape sequences
+     (\n, \t, \r, \\, \"), options MUST show the INTERPRETED character, not the
+     literal backslash sequence.
+   - Example: for `print('A\nB')`, a correct option shows "A" on one line and
+     "B" on the next line; the literal string `A\nB` is INCORRECT.
+   - Same rule for \t (tab), \r (carriage return), \\ (single backslash),
+     \" (quote).
+8. Unique options for mc and select_all:
+   - All options MUST be textually distinct after whitespace and punctuation
+     normalization.
+   - If two options would be equivalent (for example A == D modulo spacing or
+     case), regenerate the duplicate with a meaningfully different distractor.
+   - Never ship a question with A == B, A == D, or any other duplicate pair.
+9. Python identifiers stay English regardless of the question's natural
+   language (Ukrainian, Russian, Spanish, etc.). Translate the surrounding
+   prose, but keep these tokens verbatim in English — do NOT translate them:
+   - Built-in types: int, str, float, bool, list, dict, tuple, set, bytes,
+     None, True, False
+   - Built-in functions: print, len, range, type, isinstance, sorted, sum,
+     min, max, abs, open
+   - Keywords: def, class, if, elif, else, for, while, in, not, and, or,
+     return, yield, import, from, as, with, try, except, finally, raise,
+     lambda, pass, break, continue, global, nonlocal, async, await
+   - Concepts: floor division (NOT translated), comprehension, decorator,
+     generator
 
 Output ONLY a valid JSON array with this structure:
 ```json
@@ -167,6 +193,16 @@ Rules:
 - Fix only the validation issues called out below.
 - Keep the question grounded in the provided source excerpt.
 - For `mc`, provide exactly 4 options and ensure `correct_answer` is one option label.
+- For `mc` and `select_all`, all options must be textually distinct after
+  whitespace and punctuation normalization (no A == D or other duplicate pairs).
+- For escape sequences referenced in code output (\n, \t, \r, \\, \"), options
+  must show the INTERPRETED character, never the literal backslash sequence.
+- Keep Python identifiers in English regardless of the question language
+  (built-in types like int/str/float/bool/list/dict/tuple/set/None/True/False,
+  built-in functions like print/len/range/type/sorted/sum/min/max/open,
+  keywords like def/class/if/elif/else/for/while/in/not/and/or/return/yield/
+  import/from/as/with/try/except/finally/raise/lambda/pass/break/continue/
+  global/nonlocal/async/await).
 - For `tf`, use `True` or `False`.
 - Always provide a non-empty `correct_answer` and `explanation`.
 - Never add commentary outside the JSON object."""

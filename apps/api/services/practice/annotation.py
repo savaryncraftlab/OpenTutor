@@ -345,6 +345,24 @@ def normalize_problem_annotation(
     }
 
 
+_OPTION_DEDUPE_PUNCTUATION = re.compile(r"[\s\.,;:!\?\-_'\"`()\[\]{}]+")
+
+
+def _option_dedupe_key(value: str) -> str:
+    return _OPTION_DEDUPE_PUNCTUATION.sub("", value).casefold()
+
+
+def _has_duplicate_options(options: dict[str, str] | None) -> bool:
+    if not options:
+        return False
+    keys = [
+        _option_dedupe_key(value)
+        for value in options.values()
+        if _option_dedupe_key(value)
+    ]
+    return len(keys) != len(set(keys))
+
+
 def validate_question_payload(
     question: dict[str, Any],
     *,
@@ -394,9 +412,13 @@ def validate_question_payload(
             errors.append("options: multiple-choice questions require exactly 4 options")
         elif correct_answer not in options:
             errors.append("correct_answer: must match one of the multiple-choice option labels")
+        elif _has_duplicate_options(options):
+            errors.append("options: multiple-choice options must be textually distinct")
     elif question_type == "select_all":
         if not options or len(options) < 4:
             errors.append("options: select-all questions require at least 4 options")
+        elif _has_duplicate_options(options):
+            errors.append("options: select-all options must be textually distinct")
         labels = []
         if isinstance(correct_answer, str):
             labels = [item.strip().upper() for item in re.split(r"[,/;|]", correct_answer) if item.strip()]

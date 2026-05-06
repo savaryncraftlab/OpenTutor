@@ -578,6 +578,95 @@ def test_validate_question_payload_rejects_bloom_level_mismatch_for_difficulty()
     assert any("bloom_level" in error for error in validation.errors)
 
 
+def test_validate_question_payload_rejects_duplicate_mc_options():
+    validation = validate_question_payload(
+        {
+            "question_type": "mc",
+            "question": "Which keyword defines a function in Python?",
+            "options": {
+                "A": "def",
+                "B": "function",
+                "C": "lambda",
+                "D": "DEF",
+            },
+            "correct_answer": "A",
+            "explanation": "The def keyword introduces a function definition in Python.",
+            "difficulty_layer": 1,
+            "problem_metadata": {
+                "core_concept": "python function definition",
+                "bloom_level": "remember",
+            },
+        },
+        title="Python Functions",
+    )
+
+    assert validation.is_valid is False
+    assert any("textually distinct" in error for error in validation.errors)
+
+
+def test_validate_question_payload_rejects_duplicate_mc_options_modulo_whitespace():
+    validation = validate_question_payload(
+        {
+            "question_type": "mc",
+            "question": "Which built-in returns the length of a list?",
+            "options": {
+                "A": "len()",
+                "B": "size()",
+                "C": "count()",
+                "D": " len ( ) ",
+            },
+            "correct_answer": "A",
+            "explanation": "len() returns the number of items in a container.",
+            "difficulty_layer": 1,
+            "problem_metadata": {
+                "core_concept": "python builtins",
+                "bloom_level": "remember",
+            },
+        },
+        title="Python Built-ins",
+    )
+
+    assert validation.is_valid is False
+    assert any("textually distinct" in error for error in validation.errors)
+
+
+def test_validate_question_payload_accepts_distinct_mc_options():
+    validation = validate_question_payload(
+        {
+            "question_type": "mc",
+            "question": "What does print('A\\nB') output?",
+            "options": {
+                "A": "A on one line, B on the next line",
+                "B": "The literal string A\\nB",
+                "C": "Only A",
+                "D": "A space-separated A B",
+            },
+            "correct_answer": "A",
+            "explanation": "The escape sequence \\n is interpreted as a newline character at runtime.",
+            "difficulty_layer": 1,
+            "problem_metadata": {
+                "core_concept": "python escape sequences",
+                "bloom_level": "understand",
+            },
+        },
+        title="Python Print Output",
+    )
+
+    assert validation.is_valid is True
+
+
+def test_extraction_prompt_carries_content_quality_rules():
+    from services.parser.quiz import EXTRACTION_PROMPT
+
+    assert "Escape sequences" in EXTRACTION_PROMPT
+    assert "INTERPRETED" in EXTRACTION_PROMPT
+    assert "Unique options" in EXTRACTION_PROMPT
+    assert "textually distinct" in EXTRACTION_PROMPT
+    assert "Python identifiers stay English" in EXTRACTION_PROMPT
+    for token in ("def", "class", "print", "lambda", "True", "False", "None"):
+        assert f" {token}" in EXTRACTION_PROMPT or f"{token}," in EXTRACTION_PROMPT
+
+
 @pytest.mark.asyncio
 async def test_prepare_generated_questions_drops_duplicates_and_invalid_items():
     prepared = await prepare_generated_questions(
