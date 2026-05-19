@@ -11,7 +11,7 @@ from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import String, DateTime, ForeignKey, Text, Boolean, Integer, func, CheckConstraint
-from models.compat import CompatUUID, CompatJSONB
+from models.compat import CompatUUID, CompatJSONB, CompatJSONBList
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -98,7 +98,9 @@ class AuthSession(Base):
 
     # Login flow config — same action format as automation.py (click/fill/wait/submit)
     # Sensitive values use {ENV:VAR_NAME} placeholders resolved at runtime
-    login_actions: Mapped[Optional[list]] = mapped_column(CompatJSONB, nullable=True)
+    login_actions: Mapped[Optional[list]] = mapped_column(
+        CompatJSONBList, nullable=True
+    )
     login_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Validation config

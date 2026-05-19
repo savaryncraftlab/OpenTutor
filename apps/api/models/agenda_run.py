@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
-from models.compat import CompatJSONB, CompatUUID
+from models.compat import CompatJSONB, CompatJSONBList, CompatUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -35,7 +35,7 @@ class AgendaRun(Base):
     top_signal_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     # Full signal list snapshot
-    signals_json: Mapped[Optional[list]] = mapped_column(CompatJSONB, nullable=True)
+    signals_json: Mapped[Optional[list]] = mapped_column(CompatJSONBList, nullable=True)
 
     # The decision that was made (or "noop" reason)
     decision_json: Mapped[Optional[dict]] = mapped_column(CompatJSONB, nullable=True)

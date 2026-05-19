@@ -17,7 +17,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from database import Base
-from models.compat import CompatUUID, CompatJSONB
+from models.compat import CompatUUID
 
 
 class InterventionOutcome(Base):

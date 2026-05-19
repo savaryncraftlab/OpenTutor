@@ -13,7 +13,7 @@ from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import String, DateTime, ForeignKey, Text, Float, Integer, Boolean, func
-from models.compat import CompatUUID, CompatJSONB
+from models.compat import CompatUUID, CompatJSONB, CompatJSONBList
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -96,6 +96,6 @@ class LearningTemplate(Base):
     # Template metadata
     target_audience: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     # e.g. "STEM student", "Language learner", "Visual learner"
-    tags: Mapped[Optional[list]] = mapped_column(CompatJSONB, nullable=True)
+    tags: Mapped[Optional[list]] = mapped_column(CompatJSONBList, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

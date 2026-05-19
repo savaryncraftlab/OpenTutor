@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import Index, String, DateTime, ForeignKey, Text, Integer, Boolean, func
-from models.compat import CompatUUID, CompatJSONB
+from models.compat import CompatUUID, CompatJSONB, CompatJSONBList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -83,7 +83,7 @@ class PracticeProblem(Base):
 
     # v3: Knowledge point tagging + source tracking
     knowledge_points: Mapped[Optional[list]] = mapped_column(
-        CompatJSONB, nullable=True, default=list
+        CompatJSONBList, nullable=True, default=list
     )
     source: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     # Sources: extracted | ai_generated | derived

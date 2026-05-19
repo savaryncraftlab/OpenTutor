@@ -1,19 +1,25 @@
-"""PR-1 proof: ``CompatJSONBMutable`` tracks top-level in-place mutation.
+"""PR-2 proof: ``CompatJSONB`` / ``CompatJSONBList`` track top-level mutation.
 
-Contract under test: for the three columns swapped to
-``CompatJSONBMutable`` in PR-1, a TOP-LEVEL in-place subscript write
+Contract under test: for the JSON columns now bound to ``CompatJSONB``
+(the collapsed MutableDict alias), a TOP-LEVEL in-place subscript write
 (``obj.col["newkey"] = value``) followed by ``commit()`` must persist —
-re-reading the row in a fresh session shows the new key.
+re-reading the row in a fresh session shows the new key. The list
+analogue (``CompatJSONBList`` = ``MutableList.as_mutable(JSON)``) is
+proven by the ``append`` case (8b).
 
 This is the BUG-FSRS-001 mechanism (``models/compat.py``): plain
-SQLAlchemy ``JSON`` does not flag in-place dict mutation, so the UPDATE
-is silently skipped. ``MutableDict.as_mutable(JSON)`` fixes it for
-top-level keys.
+SQLAlchemy ``JSON`` does not flag in-place mutation, so the UPDATE is
+silently skipped. ``MutableDict.as_mutable(JSON)`` /
+``MutableList.as_mutable(JSON)`` fix it for the TOP LEVEL ONLY —
+*nested* writes (``obj.col["a"]["b"] = v``) are still NOT auto-tracked
+by design; that limitation is locked by the negative case (8c).
 
-Columns covered (one case each):
-- ``GeneratedAsset.content``     — the FSRS-001 site
+Columns covered:
+- ``GeneratedAsset.content``     — the FSRS-001 site (top-level dict)
 - ``AgentKV.value_json``         — highest-frequency JSON write path
 - ``Assignment.metadata_json``   — deadline-extractor latent write
+- ``PracticeProblem.knowledge_points`` — list column (8b positive)
+- ``GeneratedAsset.content``     — nested-write negative (8c lock)
 
 Harness mirrors ``tests/routers/test_flashcards.py`` /
 ``tests/models/test_xp_event_model.py`` — fresh in-memory SQLite per
@@ -36,6 +42,7 @@ from models.agent_kv import AgentKV
 from models.course import Course
 from models.generated_asset import GeneratedAsset
 from models.ingestion import Assignment
+from models.practice import PracticeProblem
 from models.user import User
 
 
@@ -117,7 +124,7 @@ async def test_generated_asset_content_tracks_top_level_mutation(
         ).scalar_one()
         assert reloaded.content.get("reviewed") is True, (
             "top-level mutation on GeneratedAsset.content did not persist "
-            "— CompatJSONBMutable not applied?"
+            "— CompatJSONB not mutation-tracking?"
         )
 
 
@@ -156,7 +163,7 @@ async def test_agent_kv_value_json_tracks_top_level_mutation(
         ).scalar_one()
         assert reloaded.value_json.get("b") == 2, (
             "top-level mutation on AgentKV.value_json did not persist "
-            "— CompatJSONBMutable not applied?"
+            "— CompatJSONB not mutation-tracking?"
         )
 
 
@@ -182,20 +189,143 @@ async def test_assignment_metadata_json_tracks_top_level_mutation(
 
     async with session_factory() as s:
         assignment = (
-            await s.execute(
-                sa.select(Assignment).where(Assignment.id == assignment_id)
-            )
+            await s.execute(sa.select(Assignment).where(Assignment.id == assignment_id))
         ).scalar_one()
         assignment.metadata_json["extraction_confidence"] = 0.91
         await s.commit()
 
     async with session_factory() as s:
         reloaded = (
-            await s.execute(
-                sa.select(Assignment).where(Assignment.id == assignment_id)
-            )
+            await s.execute(sa.select(Assignment).where(Assignment.id == assignment_id))
         ).scalar_one()
         assert reloaded.metadata_json.get("extraction_confidence") == 0.91, (
             "top-level mutation on Assignment.metadata_json did not persist "
-            "— CompatJSONBMutable not applied?"
+            "— CompatJSONB not mutation-tracking?"
+        )
+
+
+# ── 8b — CompatJSONBList positive case (top-level list mutation) ──────
+
+
+@pytest.mark.asyncio
+async def test_practice_problem_knowledge_points_tracks_top_level_list_mutation(
+    session_factory, seeded
+) -> None:
+    """``PracticeProblem.knowledge_points`` (``CompatJSONBList``) — a
+    top-level list op (``.append``) must persist.
+
+    Column choice: ``PracticeProblem.knowledge_points``
+    (``models/practice.py:85``, ``Mapped[Optional[list]]``,
+    ``CompatJSONBList``) is picked over ``Drill.hints`` because its FK
+    graph is lighter — it only needs the ``Course`` the shared
+    ``seeded`` fixture already creates (one FK), whereas ``Drill``
+    would require a 3-row ``DrillCourse`` → ``DrillModule`` → ``Drill``
+    chain. This is the list analogue of the 3 dict proofs: it asserts
+    ``MutableList.as_mutable(JSON)`` fires the UPDATE on a TOP-LEVEL
+    list mutation.
+    """
+    _user_id, course_id = seeded
+    problem_id = uuid.uuid4()
+
+    async with session_factory() as s:
+        s.add(
+            PracticeProblem(
+                id=problem_id,
+                course_id=course_id,
+                question_type="short_answer",
+                question="What is a closure?",
+                knowledge_points=["a"],
+            )
+        )
+        await s.commit()
+
+    # Top-level list op — the operation plain JSON drops.
+    async with session_factory() as s:
+        problem = (
+            await s.execute(
+                sa.select(PracticeProblem).where(PracticeProblem.id == problem_id)
+            )
+        ).scalar_one()
+        problem.knowledge_points.append("b")
+        await s.commit()
+
+    async with session_factory() as s:
+        reloaded = (
+            await s.execute(
+                sa.select(PracticeProblem).where(PracticeProblem.id == problem_id)
+            )
+        ).scalar_one()
+        kp = reloaded.knowledge_points
+        assert "b" in kp and len(kp) == 2, (
+            "top-level append on PracticeProblem.knowledge_points did not "
+            "persist — CompatJSONBList / MutableList not applied?"
+        )
+
+
+# ── 8c — nested-mutation NEGATIVE case (regression lock for R9) ───────
+
+
+@pytest.mark.asyncio
+async def test_nested_dict_mutation_is_NOT_autopersisted(
+    session_factory, seeded
+) -> None:
+    """``GeneratedAsset.content`` — a PURELY NESTED in-place write with
+    NO reassign and NO ``flag_modified`` must NOT auto-persist.
+
+    This asserts a LIMITATION, not a bug. ``MutableDict.as_mutable(JSON)``
+    tracks the OUTERMOST container only — a write that mutates an inner
+    object (``content["cards"][0]["fsrs"]["reps"] = 99``) without
+    touching a top-level key and without an explicit ``flag_modified``
+    leaves SA's attribute history empty, so no UPDATE is emitted.
+
+    This is the structural counterpart to Step 6 in
+    ``routers/flashcards.py``: that handler does exactly this kind of
+    nested write and therefore *must* call ``flag_modified(asset,
+    "content")``. If this test ever starts FAILING (i.e. the nested
+    write DID persist) someone introduced unintended deep-tracking —
+    investigate; it would also mean the ``flag_modified`` in
+    ``routers/flashcards.py`` is no longer load-bearing, which must be
+    a deliberate, reviewed change. (BUG-FSRS-001 regression lock.)
+    """
+    user_id, course_id = seeded
+    asset_id = uuid.uuid4()
+
+    async with session_factory() as s:
+        s.add(
+            GeneratedAsset(
+                id=asset_id,
+                user_id=user_id,
+                course_id=course_id,
+                asset_type="flashcards",
+                title="Batch",
+                content={"cards": [{"fsrs": {"reps": 0}}]},
+                batch_id=uuid.uuid4(),
+                version=1,
+                is_archived=False,
+            )
+        )
+        await s.commit()
+
+    # Purely NESTED in-place write — NO reassign, NO flag_modified.
+    # MutableDict does not see this (top-level-only) so it must NOT
+    # persist. (Do NOT add a reassign or flag_modified here — that
+    # would defeat the regression lock.)
+    async with session_factory() as s:
+        asset = (
+            await s.execute(
+                sa.select(GeneratedAsset).where(GeneratedAsset.id == asset_id)
+            )
+        ).scalar_one()
+        asset.content["cards"][0]["fsrs"]["reps"] = 99
+        await s.commit()
+
+    async with session_factory() as s:
+        reloaded = (
+            await s.execute(
+                sa.select(GeneratedAsset).where(GeneratedAsset.id == asset_id)
+            )
+        ).scalar_one()
+        assert reloaded.content["cards"][0]["fsrs"]["reps"] == 0, (
+            "nested mutation must NOT auto-persist — MutableDict is "
+            "top-level-only by design (see routers/flashcards.py flag_modified)"
         )

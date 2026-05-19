@@ -44,7 +44,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
-from models.compat import CompatJSONB, CompatUUID
+from models.compat import CompatJSONBList, CompatUUID
 
 
 class LearningPath(Base):
@@ -153,7 +153,7 @@ class PathRoom(Base):
     # tasks so later UI/gating work can surface one-click capstones
     # without recomputing the selection on every request.
     capstone_problem_ids: Mapped[Optional[list[str]]] = mapped_column(
-        CompatJSONB, nullable=True
+        CompatJSONBList, nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

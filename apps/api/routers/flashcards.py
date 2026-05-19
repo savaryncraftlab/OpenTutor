@@ -103,13 +103,18 @@ async def review_flashcard_endpoint(
             cards = asset.content.get("cards", [])
             if 0 <= body.card_index < len(cards):
                 cards[body.card_index]["fsrs"] = updated_card.get("fsrs", {})
-                # SQLAlchemy needs the JSON column reassigned to detect the mutation
+                # NESTED in-place write above (cards[i]["fsrs"] = ...).
+                # ``content`` is CompatJSONB (MutableDict.as_mutable(JSON)) which
+                # tracks the TOP LEVEL ONLY. The reassign below reuses the same
+                # ``cards`` list, so the new dict is value-equal to the tracked
+                # container and MutableDict's set-path short-circuits (no UPDATE).
+                # ``flag_modified`` is therefore REQUIRED here, by design — it is
+                # not redundant. (BUG-FSRS-001)
                 asset.content = {**asset.content, "cards": cards}
-                # CompatJSONB is plain JSON without MutableDict.as_mutable wrapping,
-                # so the spread above (which shares inner refs) does not register as
-                # dirty in SA's history — the UPDATE would silently be omitted on
-                # commit. flag_modified forces SA to mark the column dirty so the
-                # FSRS state actually persists. (BUG-FSRS-001)
+                # nested cards[i]["fsrs"] write — MutableDict is
+                # top-level-only; the reassign reuses `cards` so
+                # value-equality short-circuits it.
+                # (BUG-FSRS-001 — DO NOT REMOVE)
                 flag_modified(asset, "content")
 
     # Emit standardized learning event for analytics + plugin hooks

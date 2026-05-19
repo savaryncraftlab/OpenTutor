@@ -31,11 +31,16 @@ def _uuid_type():
 
 
 def _jsonb_type():
-    """Postgres ``JSONB`` when available, falling back to SQLAlchemy ``JSON``."""
+    """Postgres ``JSONB`` when available, falling back to SQLAlchemy ``JSON``.
+
+    ``CompatJSONB`` is a pre-instantiated ``TypeEngine`` post-PR-2
+    (``MutableDict.as_mutable(JSON)``), not a class — pass it directly,
+    do not call it (calling it raises ``TypeError``).
+    """
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         return postgresql.JSONB(astext_type=sa.Text())
-    return CompatJSONB()
+    return CompatJSONB
 
 
 def upgrade() -> None:

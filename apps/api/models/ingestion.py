@@ -15,7 +15,7 @@ from datetime import datetime
 
 import sqlalchemy as sa
 from sqlalchemy import String, DateTime, ForeignKey, Text, Boolean, Integer, func
-from models.compat import CompatUUID, CompatJSONB, CompatJSONBMutable
+from models.compat import CompatUUID, CompatJSONB, CompatJSONBList
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -127,7 +127,7 @@ class Assignment(Base):
     status: Mapped[str] = mapped_column(String(20), default="active")
     # Status: active, submitted, graded
 
-    metadata_json: Mapped[Optional[dict]] = mapped_column(CompatJSONBMutable, nullable=True)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(CompatJSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -153,7 +153,7 @@ class WrongAnswer(Base):
     # v3: Error classification and knowledge point tagging
     error_category: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     # Categories: conceptual | procedural | computational | reading | careless
-    knowledge_points: Mapped[Optional[list]] = mapped_column(CompatJSONB, nullable=True, default=list)
+    knowledge_points: Mapped[Optional[list]] = mapped_column(CompatJSONBList, nullable=True, default=list)
     # List of knowledge point IDs related to this wrong answer
 
     # v4: Diagnostic pair result + structured error detail

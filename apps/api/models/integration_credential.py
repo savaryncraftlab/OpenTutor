@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import String, DateTime, ForeignKey, Text, func, UniqueConstraint
-from models.compat import CompatUUID, CompatJSONB
+from models.compat import CompatUUID, CompatJSONB, CompatJSONBList
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -27,7 +27,7 @@ class IntegrationCredential(Base):
     access_token: Mapped[str] = mapped_column(Text)
     refresh_token: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    scopes: Mapped[Optional[list]] = mapped_column(CompatJSONB, nullable=True)  # list of OAuth scopes granted
+    scopes: Mapped[Optional[list]] = mapped_column(CompatJSONBList, nullable=True)  # list of OAuth scopes granted
     extra_data: Mapped[Optional[dict]] = mapped_column(CompatJSONB, nullable=True)  # e.g. {"calendar_id": "primary"}
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

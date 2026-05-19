@@ -21,7 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
-from models.compat import CompatJSONB, CompatUUID
+from models.compat import CompatJSONBList, CompatUUID
 
 
 class DrillCourse(Base):
@@ -109,8 +109,12 @@ class Drill(Base):
     starter_code: Mapped[str] = mapped_column(Text, nullable=False)
     # Server-only pytest source — never surfaced to the client via schemas.
     hidden_tests: Mapped[str] = mapped_column(Text, nullable=False)
-    hints: Mapped[list] = mapped_column(CompatJSONB, nullable=False, default=list)
-    skill_tags: Mapped[list] = mapped_column(CompatJSONB, nullable=False, default=list)
+    hints: Mapped[list] = mapped_column(
+        CompatJSONBList, nullable=False, default=list
+    )
+    skill_tags: Mapped[list] = mapped_column(
+        CompatJSONBList, nullable=False, default=list
+    )
     source_citation: Mapped[str] = mapped_column(String(300), nullable=False)
     time_budget_min: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     difficulty_layer: Mapped[int] = mapped_column(

@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func
-from models.compat import CompatJSONB, CompatUUID
+from models.compat import CompatJSONB, CompatJSONBList, CompatUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -38,7 +38,7 @@ class AgentTask(Base):
     approval_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     approval_action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     checkpoint_json: Mapped[Optional[dict]] = mapped_column(CompatJSONB, nullable=True)
-    step_results_json: Mapped[Optional[list]] = mapped_column(CompatJSONB, nullable=True)
+    step_results_json: Mapped[Optional[list]] = mapped_column(CompatJSONBList, nullable=True)
     provenance_json: Mapped[Optional[dict]] = mapped_column(CompatJSONB, nullable=True)
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

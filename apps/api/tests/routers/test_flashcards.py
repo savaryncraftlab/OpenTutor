@@ -3,15 +3,21 @@
 Contract under test: a successful flashcard review POST must persist the
 new FSRS state to ``generated_assets.content`` AND bump ``updated_at``.
 
-The bug: ``models/compat.py`` aliases ``CompatJSONB = JSON`` (without
-``MutableDict.as_mutable``). The handler in ``routers/flashcards.py``
-mutates ``asset.content`` via a dict spread that shares inner refs with
-the original — SQLAlchemy's history reports empty ``added``/``deleted``
-and silently skips the UPDATE on commit. The fix is an explicit
-``flag_modified(asset, "content")`` after the mutation.
+The original bug: ``models/compat.py`` aliased ``CompatJSONB = JSON``
+(without ``MutableDict.as_mutable``). The handler in
+``routers/flashcards.py`` mutates ``asset.content`` then reassigns it
+via a dict spread — pre-PR-2 SA's history still reported empty
+``added``/``deleted`` and silently skipped the UPDATE on commit.
+Post-PR-2 ``CompatJSONB`` is ``MutableDict.as_mutable(JSON)`` (top-level
+only). The handler does a NESTED write ``cards[i]["fsrs"]=...`` then
+reassigns ``content`` reusing that same list; the new dict is
+value-equal to the tracked container, so MutableDict's set-path
+short-circuits. An explicit ``flag_modified(asset, "content")`` in
+``routers/flashcards.py`` is therefore required for the UPDATE to fire
+(BUG-FSRS-001).
 
-Without the fix, the asserts below fail: ``cards[0].fsrs.reps`` stays at
-0, ``state`` stays at ``"new"``, and ``updated_at`` stays at the
+Pre-PR-2, the asserts below failed: ``cards[0].fsrs.reps`` stayed at
+0, ``state`` stayed at ``"new"``, and ``updated_at`` stayed at the
 ``server_default`` insert timestamp — the smoking-gun signature of the
 silent persistence loss surfaced by ``docs/qa/practice_results_write_
 rate_audit_2026_04_27.md``.
@@ -125,9 +131,15 @@ async def test_review_persists_fsrs_state_to_db(session_factory, seeded) -> None
     skipped (CompatJSONB doesn't track in-place mutation; the handler's
     dict spread shares inner refs so SA's history is empty).
 
-    Post-fix: the explicit ``flag_modified(asset, "content")`` in
-    ``routers/flashcards.py`` forces SA to mark the column dirty, the
-    UPDATE fires, and the assertions pass.
+    Post-PR-2: ``content`` is ``CompatJSONB``
+    (``MutableDict.as_mutable(JSON)``), which tracks the TOP LEVEL ONLY.
+    The handler does a nested write ``cards[i]["fsrs"]=...`` then
+    reassigns ``content`` reusing that same ``cards`` list — the new
+    dict is value-equal to the tracked container so MutableDict's
+    set-path short-circuits (no UPDATE). The explicit
+    ``flag_modified(asset, "content")`` in ``routers/flashcards.py`` is
+    what marks the column dirty so the UPDATE fires and these assertions
+    pass. (BUG-FSRS-001.)
     """
     user, course_id, batch_id, asset_id, card_id = seeded
 
@@ -188,7 +200,7 @@ async def test_review_persists_fsrs_state_to_db(session_factory, seeded) -> None
         post_fsrs = post_asset.content["cards"][0]["fsrs"]
 
         assert post_fsrs["reps"] == 1, (
-            "FSRS reps did not persist — flag_modified missing? "
+            "FSRS reps did not persist — CompatJSONB not mutation-tracking? "
             f"got {post_fsrs['reps']}, expected 1"
         )
         assert post_fsrs["state"] == "review", (
