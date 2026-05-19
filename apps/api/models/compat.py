@@ -7,6 +7,7 @@ import json as _json
 import uuid as _uuid
 
 from sqlalchemy import JSON, String, Text
+from sqlalchemy.ext.mutable import MutableDict
 from sqlalchemy.types import TypeDecorator
 
 
@@ -28,6 +29,15 @@ class CompatUUID(TypeDecorator):
 
 
 CompatJSONB = JSON
+
+# PR-1 partial mutation-tracking alias (BUG-FSRS-001). MutableDict makes
+# top-level in-place subscript writes (``col["k"] = v``) mark the row dirty
+# so an UPDATE fires on commit; plain ``JSON`` silently drops them. CAVEAT:
+# only TOP-LEVEL keys are tracked — nested ``col["a"]["b"] = ...`` is NOT.
+# Applied to 3 columns here as proof of mechanism; PR-2 collapses this back
+# into ``CompatJSONB`` schema-wide.
+CompatJSONBMutable = MutableDict.as_mutable(JSON)
+
 CompatTSVECTOR = Text
 
 

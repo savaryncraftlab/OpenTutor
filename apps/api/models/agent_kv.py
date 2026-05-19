@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, func
-from models.compat import CompatJSONB, CompatUUID
+from models.compat import CompatJSONBMutable, CompatUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -24,7 +24,7 @@ class AgentKV(Base):
     course_id: Mapped[Optional[uuid.UUID]] = mapped_column(CompatUUID, ForeignKey("courses.id", ondelete="CASCADE"), nullable=True)
     namespace: Mapped[str] = mapped_column(String(64), nullable=False)
     key: Mapped[str] = mapped_column(String(256), nullable=False)
-    value_json: Mapped[dict] = mapped_column(CompatJSONB, nullable=False)
+    value_json: Mapped[dict] = mapped_column(CompatJSONBMutable, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
