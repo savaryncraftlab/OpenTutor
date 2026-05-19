@@ -43,7 +43,7 @@ Given the content below, extract or generate practice questions. Follow these ru
 
 1. Generate a mix of question types: mc (multiple choice), tf (true/false), short_answer, fill_blank, and coding (for programming/technical content)
 2. Each question should test understanding, not just recall
-3. For multiple choice, always provide exactly 4 options (A, B, C, D)
+3. For multiple choice, always provide exactly 4 options (A, B, C, D); all 4 option values MUST be distinct, with exactly one correct
 4. Include the correct answer and a brief explanation
 5. Generate 3-8 questions depending on content length and complexity
 6. For EACH question, provide structured learning metadata:
@@ -166,7 +166,7 @@ Return ONLY one valid JSON object using the shared schema:
 Rules:
 - Fix only the validation issues called out below.
 - Keep the question grounded in the provided source excerpt.
-- For `mc`, provide exactly 4 options and ensure `correct_answer` is one option label.
+- For `mc`, provide exactly 4 options whose values are all distinct, and ensure `correct_answer` is one option label.
 - For `tf`, use `True` or `False`.
 - Always provide a non-empty `correct_answer` and `explanation`.
 - Never add commentary outside the JSON object."""

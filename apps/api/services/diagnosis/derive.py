@@ -24,6 +24,7 @@ Generate a SIMPLIFIED "clean" diagnostic version that:
 2. Removes all distractors, traps, and misleading wording
 3. Uses simpler numbers/context
 4. If multi-step, only keep the key step
+5. For multiple-choice, all 4 option values MUST be distinct (exactly one correct)
 
 Original question: {question}
 Question type: {question_type}

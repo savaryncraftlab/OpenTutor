@@ -537,6 +537,10 @@ def validate_question_payload(
             errors.append(
                 "options: multiple-choice questions require exactly 4 options"
             )
+        elif len({text.strip().casefold() for text in options.values()}) != 4:
+            errors.append(
+                "options: multiple-choice option values must all be distinct"
+            )
         elif correct_answer not in options:
             errors.append(
                 "correct_answer: must match one of the multiple-choice option labels"
